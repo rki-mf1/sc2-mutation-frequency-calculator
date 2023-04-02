@@ -1,5 +1,5 @@
-# SC2 Mutation Frequency Calculator - A Covsonar Utility Tool
-Tool for detect character and signature mutations for specific lineage in a time range. 
+# SC2 Mutation Frequency Calculator 
+A covSonar Utility tool to detect character and signature mutations based on mutation frequencies. 
 
 ## Outline
 ### Introduction
