@@ -24,6 +24,7 @@ from pathlib import Path
 from functools import reduce
 import requests
 import csv
+import xlsxwriter
 
 ########## input ############
 
@@ -319,8 +320,8 @@ def main():
                         help='optional: choose specific aa mutations which are set in TXT file')
     parser.add_argument('-m', '--matrix', required=False, action='store_true',
                         help='optional: create matrix from VOI/VOC lineages and there mutation frequencies')
-    parser.add_argument('-map', '--heatmap', required=False, action='store_true',
-                        help='optional: create heatmap visualization from ceated matrix')
+    parser.add_argument('-g', '--gradient', required=False, action='store_true',
+                        help='optional: apply 2-color conditional formatting to create gradient for xlsx file')
     parser.add_argument('-con', '--consensus', required=False, action='store_true',
                         help='optional: will create consensus sequences based on given lineages')
     parser.add_argument('-check', '--consensus_check', required=False, action='store_true',
@@ -517,9 +518,24 @@ def main():
                     if args.output:
                         outfile = 'output/matrix/' + args.output
                     else:
-                        outfile = 'output/matrix/frequency_matrix.xlsx'
+                        #outfile = 'output/matrix/frequency_matrix.xlsx'
+                        outfile = 'output/matrix/' + date_range + '.xlsx'
                     df_matrix.to_excel(outfile)
                     print(f"Frequency matrix is created in {outfile}")
+
+                    if args.gradient:
+                        excel_file = outfile
+                        sheet_name = 'Mutation Frequency Table'
+                        writer = pd.ExcelWriter(excel_file, engine='xlsxwriter')
+                        df_matrix.to_excel(writer, sheet_name=sheet_name)
+                        workbook = writer.book
+                        worksheet = writer.sheets[sheet_name]
+                        end = chr(ord('B') + (len(df_matrix.columns)-1))
+                        range = 'B3:' + end + str(len(df_matrix)+1)
+                        worksheet.conditional_format(range, {'type': '2_color_scale',
+                                             'min_color': 'white',
+                                             'max_color': 'red'})
+                        writer.save()
 
                 elif args.signature:
                     if args.lineages:
