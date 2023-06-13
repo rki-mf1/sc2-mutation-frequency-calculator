@@ -73,6 +73,16 @@ def restricted_float(x):
         raise argparse.ArgumentTypeError("%r not in range [0.0, 1.0]" % (x,))
     return x
 
+
+def colToExcel(col):  # col is 1 based
+    excelCol = str()
+    div = col
+    while div:
+        (div, mod) = divmod(div-1, 26)  # will return (x, 0 .. 25)
+        excelCol = chr(mod + 65) + excelCol
+
+    return excelCol
+
 ########## main functionality ############
 
 def init_num_lineages(sample_column, mutation_profile):
@@ -328,9 +338,6 @@ def main():
                         help='optional: alterate path to check whether the created consensus seqs have the right mutations')
     parser.add_argument('-warning', '--mutation_warning', required=False, action='store_true',
                         help='optional: Warning message if first position of mutation is not the position in ref seq')
-    # https://bioinformaticshome.com/db/collection/phylogenetics
-    parser.add_argument('-vis', '--visualization', metavar='', required=False,
-                        help='optional: visualization of consensus sequences')
     parser.add_argument('-cut', '--cut_off', metavar='', required=False, type=restricted_float,
                         help='optional: set threshold for aa mutations to create matrix or consensus')
     parser.add_argument('-upper', '--upper_cut', metavar='', required=False, type=restricted_float,
@@ -344,6 +351,7 @@ def main():
     parser.add_argument('-level', '--mutation_level', metavar='', required=False,
                         help='optional: choose mutation level to get either aa or nt mutation frequencies')
     args = parser.parse_args()
+    
     
     #load yml file 
     with open("config/config.yml", "r") as ymlfile:
@@ -518,8 +526,8 @@ def main():
                     if args.output:
                         outfile = 'output/matrix/' + args.output
                     else:
-                        #outfile = 'output/matrix/frequency_matrix.xlsx'
-                        outfile = 'output/matrix/' + date_range + '.xlsx'
+                        outfile = 'output/matrix/' + \
+                            date_range.replace(":", "_") + '.xlsx'
                     df_matrix.to_excel(outfile)
                     print(f"Frequency matrix is created in {outfile}")
 
@@ -530,14 +538,14 @@ def main():
                         df_matrix.to_excel(writer, sheet_name=sheet_name)
                         workbook = writer.book
                         worksheet = writer.sheets[sheet_name]
-                        end = chr(ord('B') + (len(df_matrix.columns)-1))
-                        range = 'B3:' + end + str(len(df_matrix)+1)
-                        worksheet.conditional_format(range, {'type': '2_color_scale',
+                        end = colToExcel(len(df_matrix.columns)+1) 
+                        coordinate = 'B3:' + end + str(len(df_matrix)+1)
+                        worksheet.conditional_format(coordinate, {'type': '2_color_scale',
                                              'min_color': 'white',
                                              'max_color': 'red'})
                         writer.save()
 
-                elif args.signature:
+                elif args.signature: #CHANGE
                     if args.lineages:
                         file = open(args.signature, "r")
                         data = list(csv.reader(file, delimiter="\t"))
@@ -545,26 +553,44 @@ def main():
                         sig_lineages = [row[0].strip() for row in data]
                     else:
                         lineages = list(df_matrix.columns)
+                    
+                    #print(df_matrix)
 
-                    if not args.upper_cut:  # cut-off row wise
-                        print("cut-off = 0.75 since no cut-off is selected")
-                        upper_cut = 0.75
-                    else:
-                        upper_cut = args.upper_cut
-                        print(f"cut-off is set to {upper_cut}")
+                    #count values (in how many lineages a mutations occurs > threshold) along the frequencies 
+                    counts = (df_matrix >= 0.75).sum(axis=1)
+                    frequencies = df_matrix[df_matrix >= 0.75].apply(
+                        lambda row: row[row.notnull()].tolist(), axis=1)
+                    count_freq_table = pd.DataFrame(
+                        {'count': counts, 'frequency': frequencies})
+                    count_freq_table['frequency'] = count_freq_table['frequency'].apply(tuple)
+                    count_freq_table_sort = count_freq_table.sort_values(by=['count', 'frequency'], ascending=[True, False])
+                    count_freq_table_sort['frequency'] = count_freq_table_sort['frequency'].apply(
+                        list)
+                    #print(count_freq_table_sort)
+                    single_signature_table = count_freq_table_sort[count_freq_table_sort['count'] == 1]
+                    #print(single_signature_table)
+                    
+                    single_signature_lineage = [df_matrix.columns[df_matrix.loc[single_signature_table.iloc[i].name] == single_signature_table.iloc[i]['frequency'][0]].tolist()[
+                                                0] for i in range(len(single_signature_table))]
+                    single_signature_table['lineage'] = single_signature_lineage
+                    print(single_signature_table)
+                    
+                    single_signatures = {}
+                    unique_lineages = single_signature_table['lineage'].unique()
 
-                    if not args.lower_cut:
-                        lower_cut = upper_cut/3
-                    else:
-                        lower_cut = args.lower_cut
+                    for lineage in unique_lineages:
+                        grouped = single_signature_table[single_signature_table['lineage'] == lineage].index.tolist()
 
-                    print("Signature mutations are: ")
-                    for lineage in sig_lineages:
-                        candidates = df_matrix[lineage][(df_matrix[lineage] >= upper_cut)]
-                        candidate_mutations = list(candidates.index)
-                        df_matrix_candidates = df_matrix.loc[candidate_mutations].drop(lineage, axis=1)
-                        df_matrix_signature = df_matrix_candidates[(df_matrix_candidates <= lower_cut).all(1)]
-                        print(lineage, ':', list(df_matrix_signature.index))
+                        if 'lineage' in single_signatures:
+                            single_signatures['lineage'][lineage] = grouped
+                        else:
+                            single_signatures['lineage'] = {lineage: grouped}
+                    
+                    for column, value_grouped in single_signatures.items():
+                        print(f"Single signature mutations for lineages within {date_range}")
+                        for value, grouped in value_grouped.items():
+                            print(f"Lineage: {value}")
+                            print(grouped)
 
             elif args.consensus: 
                 print("Mutation Frequency per lineage wil be computed..")
