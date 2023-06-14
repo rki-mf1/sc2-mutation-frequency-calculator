@@ -131,6 +131,52 @@ def lineage_mutation_frequency(mutation_type, df_mutation_profile, lineages, num
         left, right, left_index=True, right_index=True, how='outer'), list_df_lin_frequency)
     return merged_df
 
+######### Matrix optimization ############
+
+def orf_frameshift_matrix(matrix):
+    '''Frameshift of ORF1a and ORF1b, both share the same mutation and have to be merged to ORF1ab
+    input: df_matrix_noframeshift_unsorted
+    output: df_matrix_frameshift_unsorted
+    '''
+    orf_matrix = matrix[matrix.index.str.startswith('ORF1a')
+                           | matrix.index.str.startswith('ORF1b')]
+    index_names = orf_matrix.index.map(
+        lambda x: x.split(':', 1)[1])
+    duplicated_names = index_names[index_names.duplicated(
+        keep=False)].unique()
+    duplicated_df = orf_matrix[orf_matrix.index.str.contains(
+        '|'.join(duplicated_names))]
+    duplicate_indice_names = duplicated_df.index.tolist()
+    duplicated_df_half = duplicated_df.iloc[:len(
+        duplicated_df) // 2]
+    duplicated_df_half.rename(index=lambda x: x.replace(
+        x.split(':', 1)[0], 'ORF1ab', 1), inplace=True)
+    df_matrix_noframeshift = matrix.drop(
+        index=duplicate_indice_names)
+    df_matrix = pd.concat(
+        [df_matrix_noframeshift, duplicated_df_half])
+    return df_matrix
+
+def sort_matrix_columnandindex(matrix, num_lineages):
+    '''Sort matrix according to columnnames (alphabetically) and indexnames by gene and position
+    input: unsorted matrix, dict with num of lineages
+    output: sorted matrix
+    '''
+    df_matrix = matrix.reindex(
+        sorted(matrix.columns), axis=1)
+    df_matrix = df_matrix.iloc[df_matrix.index.map(lambda x: (x.split(':', 1)[0], int(
+        ''.join(filter(str.isdigit, x.split(':', 1)[1]))))).argsort()]
+    matching_keys = set(num_lineages.keys()).intersection(
+        df_matrix.columns)
+    dict_filtered = {
+        k: num_lineages[k] for k in matching_keys}
+    dict_filtered_sorted = dict(sorted(dict_filtered.items()))
+    genome_number = pd.Series(
+        dict_filtered_sorted, name='Number of sequences detected')
+    df_matrix = pd.concat(
+        [genome_number.to_frame().T, df_matrix])
+    return df_matrix
+
 
 ########## optional parameters ############
 
@@ -489,19 +535,19 @@ def main():
                     print("no cutoff")
                     if not args.aa_mutations:
                         print("and no aa mutations")
-                        df_matrix = df_lineage_mutation_frequency
+                        df_matrix_noframeshift_unsorted = df_lineage_mutation_frequency
                     else:
                         print("but aa mutations")
                         list_aa_single_changes = txt_to_string(
                             args.aa_mutations)[0].split(" ")
-                        df_matrix = df_lineage_mutation_frequency[df_lineage_mutation_frequency.index.isin(
+                        df_matrix_noframeshift_unsorted = df_lineage_mutation_frequency[df_lineage_mutation_frequency.index.isin(
                             list_aa_single_changes)]
                 else: #cutoff
                     print("cutoff is selected")
                     cut_off = args.cut_off
                     if not args.aa_mutations:
                         print("but no aa mutations")
-                        df_matrix = df_lineage_mutation_frequency.fillna(
+                        df_matrix_noframeshift_unsorted = df_lineage_mutation_frequency.fillna(
                             0)[(df_lineage_mutation_frequency.fillna(0) >= cut_off).any(axis=1)]
                     else: #cutoff + aa 
                         print("and aa mutations")
@@ -509,20 +555,12 @@ def main():
                             args.aa_mutations)[0].split(" ")
                         df_matrix_aa = df_lineage_mutation_frequency[df_lineage_mutation_frequency.index.isin(
                             list_aa_single_changes)]
-                        df_matrix = df_matrix_aa.fillna(0)[(df_matrix_aa.fillna(0) >= args.cut_off).any(axis=1)]
+                        df_matrix_noframeshift_unsorted = df_matrix_aa.fillna(0)[(df_matrix_aa.fillna(0) >= args.cut_off).any(axis=1)]
 
                 if args.matrix:
-                    df_matrix = df_matrix.reindex(sorted(df_matrix.columns), axis=1)
-                    df_matrix = df_matrix.iloc[df_matrix.index.map(lambda x: (x.split(':', 1)[0], int(
-                        ''.join(filter(str.isdigit, x.split(':',1)[1]))))).argsort()]
-                    matching_keys = set(dict_num_lineage.keys()).intersection(df_matrix.columns)
-                    dict_filtered = {k: dict_num_lineage[k] for k in matching_keys}
-                    dict_filtered_sorted = dict(sorted(dict_filtered.items()))
-                    genome_number = pd.Series(
-                        dict_filtered_sorted, name='Number of sequences detected')
-                    df_matrix = pd.concat([genome_number.to_frame().T, df_matrix])
-                    print(df_matrix)
-                    
+                    df_matrix_frameshift_unsorted = orf_frameshift_matrix(df_matrix_noframeshift_unsorted)
+                    df_matrix = sort_matrix_columnandindex(df_matrix_frameshift_unsorted, dict_num_lineage)
+                
                     if args.output:
                         outfile = 'output/matrix/' + args.output
                     else:
