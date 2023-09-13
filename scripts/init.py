@@ -117,26 +117,25 @@ def lineage_mutation_frequency(mutation_type, df_mutation_profile, lineages, num
     list_df_num_mutations = []
     for lineage in lineages:
         df_lineage_subprofile = df_mutation_profile.loc[
-            df_mutation_profile['lineage'] == lineage][mutation_type]
-
-        if not df_lineage_subprofile.empty:
-            result_list = [
-                item for sublist in df_lineage_subprofile.str.split() for item in sublist]
-            df_num_mutations = pd.Series(result_list).value_counts(
-                ).rename_axis('mutation').reset_index(name='counts')
-            df_num_mutations.set_index('mutation', inplace=True)
-            df_num_mutations.index.name = None
-            df_num_mutations.rename(columns={'counts': lineage}, inplace=True)
-            df_num_mutations[lineage] = round(
-                df_num_mutations[lineage] / num_lineages[lineage], 3)
-            list_df_num_mutations.append(df_num_mutations)
+            df_mutation_profile['lineage'] == lineage][mutation_type].reset_index(drop=True)
+        df_lineage_subprofile = df_lineage_subprofile.dropna()
+        result_list = [
+            item for sublist in df_lineage_subprofile.str.split() for item in sublist]
+        df_num_mutations = pd.Series(result_list).value_counts(
+            ).rename_axis('mutation').reset_index(name='counts')
+        df_num_mutations.set_index('mutation', inplace=True)
+        df_num_mutations.index.name = None
+        df_num_mutations.rename(columns={'counts': lineage}, inplace=True)
+        df_num_mutations[lineage] = round(
+            df_num_mutations[lineage] / num_lineages[lineage], 3)
+        list_df_num_mutations.append(df_num_mutations)
     merged_df = reduce(lambda left, right: pd.merge(
         left, right, left_index=True, right_index=True, how='outer'), list_df_num_mutations)
     return merged_df
 
 ######### Matrix optimization ############
 
-def orf_frameshift_matrix(matrix):
+def orf_frameshift_matrix(matrix): #IFF there are duplicates in ORF1a and ORF1b
     '''Frameshift of ORF1a and ORF1b, both share the same mutation and have to be merged to ORF1ab
     input: df_matrix_noframeshift_unsorted
     output: df_matrix_frameshift_unsorted
@@ -180,7 +179,6 @@ def sort_matrix_columnandindex(matrix, num_lineages):
         [genome_number.to_frame().T, df_matrix])
     return df_matrix
 
-
 def sort_matrix_nt_columnandindex(matrix, num_lineages):
     '''Sort matrix according to columnnames (alphabetically) and indexnames by gene and position
     input: unsorted matrix, dict with num of lineages
@@ -221,7 +219,6 @@ def init_num_labs(matrix, num_labs):
     matrix = pd.concat([matrix.iloc[:sequences_index + 1],
         labcounts_row.to_frame().T, matrix.iloc[sequences_index + 1:]])
     return matrix
-
 
 ########## optional parameters ############
 
@@ -304,7 +301,7 @@ def create_consensus(infile, outdir, lineage_dna_frequency, threshold):
             snp, insertion, deletion = ([] for i in range(3))
             consensus_id, consensus_seq = lineage, ref_seq
 
-            file_out = f'output/consensus/{outdir}/sc2_consensus2_{lineage}.fasta'
+            file_out = f'{outdir}/sc2_consensus2_{lineage}.fasta'
             for mutation in list_mutations:
                 # deletion
                 if ":" in mutation:
@@ -462,37 +459,37 @@ def main():
     # Step1: check if covsonar mutation profile (output tsv) is given
     #AA Mutation als Fall für tsv generation DATAFRAME MERGE ÄNDERN AUF OUTTER
     if not args.mutation_profile:  
-        print("Mutation profile from Covsonar doesnt exist:")
+        print("Mutation profile from Covsonar doesn't exist:")
         print("Covsonar running ...")
             
         if args.date_range:
             date_range = args.date_range
         else:
-            print("A date range and database should be available for Covsonar to create mutation profile")
+            print("Input missing: A date range and database should be available for Covsonar to create mutation profile!")
 
         if args.lineages and not args.aa_mutations:
-            print("lineages but no aa")
+            print("Input: lineages but no aa mutations")
             if isinstance(args.lineages, str):
                 lineages_string = args.lineages
             else:
                 lineages_string = txt_to_string(args.lineages)
             if args.output:
-                outfile = 'input/' + args.output
+                outfile = 'input/tsv/' + args.output
             else:
-                outfile = 'input/mutation_lineages_profile.tsv'
+                outfile = 'input/tsv/mutation_lineages_profile.tsv'
             os.system(
                 f"python3 covsonar/sonar.py match --lineage {lineages_string} --date {args.date_range} --db {args.database} --tsv > {outfile}")
             print(f"Covsonar created mutation profile in {outfile}. \n"
                 "Choosen Lineages: \n"
                 f"{lineages_string}")
         elif args.aa_mutations and not args.lineages: #für jede mutation (single als auch comb) muss covsonar einzeln ausgeführt werden, freq berechnung für single/comb dann einzeln basierend auf merged tsv
-            print("aa but no lin")
+            print("Input: aa mutations but no lineages")
             aa_single_changes, aa_comb_changes = txt_to_string(args.aa_mutations)[0].replace(
                 " ", " " + '-i' + " "), txt_to_string(args.aa_mutations)[1]
             if args.output:
-                outfile = 'input/' + args.output
+                outfile = 'input/tsv/' + args.output
             else:
-                outfile = 'input/mutation_aa_single_profile.tsv'
+                outfile = 'input/tsv/mutation_aa_single_profile.tsv'
             #comb_outfiles = 'input/combinations/mutation_aa{counter}_profile.tsv'
             os.system(
                 f"python3 covsonar/sonar.py match -i {aa_single_changes} --date {args.date_range} --db {args.database} --tsv > {outfile}")
@@ -500,14 +497,14 @@ def main():
                 "Choosen Amino acid Changes: \n"
                 f"{aa_single_changes}")
         elif args.lineages and args.aa_mutations:
-            print("sowohl lin als auch aa")
+            print("Input: lineages and aa mutations")
             lineages_string = txt_to_string(args.lineages)
             aa_single_changes = txt_to_string(args.aa_mutations)[0].replace(
                 " ", " " + '-i' + " ")
             if args.output:
-                outfile = 'input/' + args.output
+                outfile = 'input/tsv/' + args.output
             else:
-                outfile = 'input/mutation_aa_lineages_profile.tsv'
+                outfile = 'input/tsv/mutation_aa_lineages_profile.tsv'
             os.system(
                 f"python3 covsonar/sonar.py match -i {aa_single_changes} --lineage {lineages_string} --date {args.date_range} --db {args.database} --tsv > {outfile}")
             print(f"Covsonar created mutation profile in {outfile}. \n"
@@ -517,12 +514,12 @@ def main():
                 f"{lineages_string}")
         else:
             if not args.date_range or not args.database:
-                print("A date range and database should be available for Covsonar to create mutation profile")
+                print("Input missing: A date range and database should be available for Covsonar to create mutation profile")
             else:
                 if args.output:
-                    outfile = 'input/' + args.output
+                    outfile = 'input/tsv/' + args.output
                 else:
-                    outfile = 'input/mutation_profile.tsv'
+                    outfile = 'input/tsv/mutation_profile.tsv'
                 os.system(
                     f"python3 covsonar/sonar.py match --date {args.date_range} --db {args.database} --tsv > {outfile}")
                 print(f"Covsonar created mutation profile in {outfile}.")
@@ -540,13 +537,17 @@ def main():
             
             print("Absolut number of sequenced lineages will be counted...")
             df_dna_aa_profile, dict_num_lineage = init_num_lineages('lineage', args.mutation_profile)
-            
+
             if args.cut_off_lineage:
-                sample_cut_off = args.cut_off_lineages
+                sample_cut_off = args.cut_off_lineage
                 dict_filter_num_lineage = {k: v for k, v in dict_num_lineage.items() if v >= args.cut_off_lineage}
+                dict_other_lineages = {
+                    k: v for k, v in dict_num_lineage.items() if v < args.cut_off_lineage} 
             else:
                 sample_cut_off = 10
                 dict_filter_num_lineage = {k: v for k, v in dict_num_lineage.items() if v >= sample_cut_off}
+                dict_other_lineages = {
+                    k: v for k, v in dict_num_lineage.items() if v < sample_cut_off}
             
             if args.lineages:  # .txt has to be string
                 tmp = list(dict_filter_num_lineage.keys())
@@ -555,16 +556,33 @@ def main():
             else:
                 lineage_list = list(dict_filter_num_lineage.keys())
             
-            print(f"Number of lineages with minimum sample cut-off {sample_cut_off}: ", len(lineage_list))
-    
+            sorted_lineage_list = sorted(lineage_list)
+            dict_filter_num_lineage = {key: dict_filter_num_lineage[key] for key in lineage_list}
+            dict_filter_num_lineage = dict(sorted(dict_filter_num_lineage.items()))
+            print("Number of samples per lineage:", dict_filter_num_lineage)
+            print(dict_other_lineages)
+
             selected_mutation_profile = df_mutation_profile.loc[df_mutation_profile['lineage'].isin(lineage_list), ['lab', 'lineage']]
             lab_counts = selected_mutation_profile.groupby('lineage')['lab'].nunique()
-        
-            print("Compute mutation frequency ...") #ACHTUNG FEHLER
-            
+
+            print("Compute mutation frequency ...") 
+
             if args.matrix or args.signature: 
                 print("Matrix will be created on the fly..")
 
+                # column "other lineages"
+                lineage_list.append("other_lineages")
+                other_lineages_samples = sum(dict_other_lineages.values())
+                dict_filter_num_lineage['other_lineages'] = other_lineages_samples
+                df_dna_aa_profile['lineage'] = df_dna_aa_profile['lineage'].apply(
+                    lambda x: 'other_lineages' if x in dict_other_lineages else x)
+                df_mutation_profile['lineage'] = df_mutation_profile['lineage'].apply(
+                    lambda x: 'other_lineages' if x in dict_other_lineages else x)
+                selected_mutation_profile = df_mutation_profile.loc[df_mutation_profile['lineage'].isin(
+                    lineage_list), ['lab', 'lineage']]
+                lab_counts = selected_mutation_profile.groupby('lineage')[
+                'lab'].nunique()
+               
                 if args.mutation_level == "aa":
                     df_lineage_mutation_frequency = lineage_mutation_frequency(
                     "aa_profile", df_dna_aa_profile, lineage_list, dict_filter_num_lineage)
@@ -583,7 +601,7 @@ def main():
                             args.aa_mutations)[0].split(" ")
                         df_matrix_noframeshift_unsorted = df_lineage_mutation_frequency[df_lineage_mutation_frequency.index.isin(
                             list_aa_single_changes)]
-                    
+                
                 else: #cutoff
                     print("cutoff is selected")
                     cut_off_frequency = args.cut_off_frequency
@@ -601,7 +619,7 @@ def main():
                 
                 df_matrix_frameshift_unsorted = orf_frameshift_matrix(
                     df_matrix_noframeshift_unsorted)
-                
+               
                 if args.mutation_level == "aa":
                     df_matrix_without_lab = sort_matrix_columnandindex(
                         df_matrix_frameshift_unsorted, dict_filter_num_lineage)
@@ -609,7 +627,7 @@ def main():
                 elif args.mutation_level == "nt":
                     df_matrix_without_lab = sort_matrix_nt_columnandindex(
                         df_matrix_frameshift_unsorted, dict_filter_num_lineage)
-                    
+
                 df_matrix = init_num_labs(df_matrix_without_lab, lab_counts)
                 
                 if args.matrix:
@@ -778,39 +796,78 @@ def main():
 
             elif args.consensus: 
                 print("Mutation Frequency per lineage will be computed..")
+                
                 df_lineage_mutation_frequency = lineage_mutation_frequency(
-                    "dna_profile", df_dna_aa_profile, sorted(lineage_list), dict_filter_num_lineage)
-                num_of_lineages = len(lineage_list)
-
+                    "dna_profile", df_dna_aa_profile, sorted_lineage_list, dict_filter_num_lineage)
+                num_of_lineages = len(sorted_lineage_list)
+                
                 if args.bootstrap:
                     print("random bootstrap method determines minimum sample size per lineage...")
-                    #sample size = dict_num_lineage
+
                     bootstrap_threshold = 0.75
+                    sample_size_factor = 1/2  
+                    print(f"Bootstrap treshold: {bootstrap_threshold}, the sample size will be reduced by: {sample_size_factor}")
+
+                    dict_filter_num_lineage = dict(sorted(dict_filter_num_lineage.items(), key=lambda x: x[1], reverse=True))
+                    sorted_lineage_list = list(dict_filter_num_lineage.keys())
                     
-                    for lineage, sample_size in dict_filter_num_lineage.items():
+                    df_bootstrap_lineages = pd.DataFrame(columns=['Lineages', 'Sample_size', 'Reduction_factor', 'Bootstrap_value'])
+                    for lineage in sorted_lineage_list:
+                        #print(f"---{lineage}---")
+                        sample_size = dict_num_lineage[lineage]
                         df_lineage_mutation_profile = df_dna_aa_profile[
                             df_dna_aa_profile['lineage'] == lineage]
                         ground_truth = df_lineage_mutation_frequency.index[df_lineage_mutation_frequency[lineage]
                                                             >= bootstrap_threshold].tolist()
-                        sample_size = math.floor(sample_size/2)
+                        sample_size = math.floor(sample_size*sample_size_factor)
                         dict_filter_num_lineage[lineage] = sample_size
-                
+                        
+                        df_lineage_sample = pd.DataFrame(columns=['Lineages', 'Sample_size', 'Reduction_factor', 'Bootstrap_value'])
                         while sample_size >= 2:
                             bootstrap_range = 100
                             mutation_profile_sampled = []
                             for k in range(bootstrap_range):
-                                df_lineage_mutation_profile_subsample = df_lineage_mutation_profile.sample(n=sample_size).reset_index(drop=True)
-                                df_lineage_mutation_frequency = lineage_mutation_frequency(
-                                    "dna_profile", df_lineage_mutation_profile_subsample, sorted(lineage_list), dict_filter_num_lineage)
-                                list_mutations = df_lineage_mutation_frequency.index[df_lineage_mutation_frequency[lineage]
-                                                                             >= bootstrap_threshold].tolist()
+                                df_lineage_mutation_profile_subsample = df_lineage_mutation_profile.sample(n=sample_size)['dna_profile'].reset_index(drop=True)
+                                df_lineage_subprofile = df_lineage_mutation_profile_subsample.dropna()
+                                mutation_profile_aggregated = [
+                                    item for sublist in df_lineage_subprofile.str.split() for item in sublist]
+                                df_num_mutations = pd.Series(mutation_profile_aggregated).value_counts(
+                                ).rename_axis('mutation').reset_index(name='counts')
+                                df_num_mutations.set_index('mutation', inplace=True)
+                                df_num_mutations.index.name = None
+                                df_num_mutations.rename(columns={'counts': lineage}, inplace=True)
+                                df_num_mutations[lineage] = round(df_num_mutations[lineage] / dict_filter_num_lineage[lineage], 3)
+                                list_mutations = df_num_mutations.index[df_num_mutations[lineage]
+                                                                                     >= bootstrap_threshold].tolist()
                                 mutation_profile_sampled.append(list_mutations)
                             
                             boostrap = bootstrap_value(ground_truth, mutation_profile_sampled, bootstrap_range)
-                            print(f"Bootstrap-value for {sample_size}: ", boostrap)
-                            sample_size = math.floor(sample_size/2)
+                            #print(f"Bootstrap-value for {sample_size}: ", boostrap)
+                            df_lineage_sample.loc[len(df_lineage_sample)] = [
+                                lineage, sample_size, sample_size_factor, boostrap]
+                            sample_size = math.floor(sample_size*sample_size_factor)
                             dict_filter_num_lineage[lineage] = sample_size
-                            
+                        if (df_lineage_sample['Bootstrap_value'] >= 0.75).any():
+                            row_minimum_sample_size = df_lineage_sample[df_lineage_sample['Bootstrap_value']>= 0.75].iloc[-1]
+                            df_bootstrap_lineages = df_bootstrap_lineages.append(
+                                row_minimum_sample_size, ignore_index=True)
+                        else:
+                            df_bootstrap_lineages.loc[len(df_bootstrap_lineages)] = [
+                                lineage, df_lineage_sample['Sample_size'].iloc[0]*2, sample_size_factor, 1.0]
+                    print(df_bootstrap_lineages)
+
+                    date_range = date_range.replace(":", "_")
+                    df_bootstrap_lineages.to_csv(f'output/bootstrap/{date_range}/2023-09-06_accession-all_min-sample-size_cut-off-0-75_{date_range}.tsv', sep="\t", index=False)
+                    
+                    #bootstrap plot
+                    x_values, y_values = sorted_lineage_list, df_bootstrap_lineages['Sample_size']
+                    plt.bar(x_values, y_values)
+                    plt.xlabel('Lineages')
+                    plt.ylabel('Minimum sample size')
+                    plt.title('Random Bootstrap for determining minimum sample size') 
+                    plt.savefig(
+                        f"output/bootstrap/{date_range}/2023-09-06_accession-all_min-sample-size_cut-off-0-75.png")
+                
                 else: 
                     print("creating consensus sequences...")
                     file_in = 'data/NC_045512.2.fasta.txt'
@@ -826,7 +883,10 @@ def main():
                     if args.output:
                         outpath = fasta_dir + args.output
                     else:
-                        outpath = fasta_dir + {date_range}
+                        outpath = fasta_dir + date_range
+
+                    if not os.path.exists(outpath + '/'):
+                        os.makedirs(outpath + '/')
 
                     df_created_consensus_mutations = create_consensus(file_in, outpath, df_lineage_mutation_frequency, cut_off_frequency)
                     
@@ -838,7 +898,10 @@ def main():
                                 records.append(record)
 
                     # Write the merged fasta sequences to a new file
-                    multi_fasta = f"output/consensus/{outpath}/multi.fasta"
+                    if args.output:
+                        multi_fasta = f"{outpath}/{args.output}_multi.fasta"
+                    else:
+                        multi_fasta = f"{outpath}/{outpath}_multi.fasta"
 
                     with open(multi_fasta, "w") as f:
                         SeqIO.write(records, f, "fasta")
