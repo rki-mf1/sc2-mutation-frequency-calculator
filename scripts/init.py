@@ -29,6 +29,7 @@ from itertools import combinations
 from collections import defaultdict
 import matplotlib.pyplot as plt
 import math
+from pango_aliasor.aliasor import Aliasor
 
 ########## input ############
 
@@ -73,7 +74,6 @@ def restricted_float(x):
     if x < 0.0 or x > 1.0:
         raise argparse.ArgumentTypeError("%r not in range [0.0, 1.0]" % (x,))
     return x
-
 
 def colToExcel(col):  # col is 1 based
     excelCol = str()
@@ -219,6 +219,19 @@ def init_num_labs(matrix, num_labs):
     matrix = pd.concat([matrix.iloc[:sequences_index + 1],
         labcounts_row.to_frame().T, matrix.iloc[sequences_index + 1:]])
     return matrix
+
+def pangolin_parent(input_string):
+    recombinant = "X"
+    if not input_string.startswith(recombinant):
+        parts = input_string.split('.')
+
+        if len(parts) > 4: #pangolin nomenclature 
+            result = '.'.join(parts[:4])
+        else:
+            result = input_string
+    else:  # https://github.com/MDU-PHL/pango-collapse/issues/7
+        result = "XBB"
+    return result
 
 ########## optional parameters ############
 
@@ -367,13 +380,6 @@ def create_consensus(infile, outdir, lineage_dna_frequency, threshold):
     print("Consensus sequences can now be analysed using MSA and phylogenetic trees")
     return df_consensus_mutations
 
-def create_merged_fasta():
-    ''' create merged fasta from many fasta 
-    input: many fasta 
-    output: merged fasta
-    '''
-    return
-
 def consensus_mutations(lineages, df_mutation_profile):
     ''' creates dataframe of lineages and there mutations for consensus check 
     input: list of lineages 
@@ -450,7 +456,6 @@ def main():
     parser.add_argument('-level', '--mutation_level', metavar='', required=False,
                         help='optional: choose mutation level to get either aa or nt mutation frequencies')
     args = parser.parse_args()
-    
     
     #load yml file 
     with open("config/config.yml", "r") as ymlfile:
@@ -561,10 +566,7 @@ def main():
             dict_filter_num_lineage = dict(sorted(dict_filter_num_lineage.items()))
             print("Number of samples per lineage:", dict_filter_num_lineage)
             print(dict_other_lineages)
-
-            selected_mutation_profile = df_mutation_profile.loc[df_mutation_profile['lineage'].isin(lineage_list), ['lab', 'lineage']]
-            lab_counts = selected_mutation_profile.groupby('lineage')['lab'].nunique()
-
+            
             print("Compute mutation frequency ...") 
 
             if args.matrix or args.signature: 
@@ -578,17 +580,25 @@ def main():
                     lambda x: 'other_lineages' if x in dict_other_lineages else x)
                 df_mutation_profile['lineage'] = df_mutation_profile['lineage'].apply(
                     lambda x: 'other_lineages' if x in dict_other_lineages else x)
+                
                 selected_mutation_profile = df_mutation_profile.loc[df_mutation_profile['lineage'].isin(
                     lineage_list), ['lab', 'lineage']]
                 lab_counts = selected_mutation_profile.groupby('lineage')[
                 'lab'].nunique()
-               
+                
+                for lineage, lab_count in lab_counts.items():
+                    if lab_count <= 1:
+                        print(
+                            f"Warning: {lineage} comes from only {lab_count} labs! Note, that {lineage} is not excluded from further analysis but should be considered critically.")
+                
                 if args.mutation_level == "aa":
                     df_lineage_mutation_frequency = lineage_mutation_frequency(
                     "aa_profile", df_dna_aa_profile, lineage_list, dict_filter_num_lineage)
                 elif args.mutation_level == "nt":
                     df_lineage_mutation_frequency = lineage_mutation_frequency(
                         "dna_profile", df_dna_aa_profile, lineage_list, dict_filter_num_lineage)
+                else:
+                    "MissingError: mutation level is not defined"
                 
                 if not args.cut_off_frequency: # rowwise
                     print("no cutoff")
@@ -619,16 +629,49 @@ def main():
                 
                 df_matrix_frameshift_unsorted = orf_frameshift_matrix(
                     df_matrix_noframeshift_unsorted)
-               
+                
                 if args.mutation_level == "aa":
-                    df_matrix_without_lab = sort_matrix_columnandindex(
+                    df_matrix_frameshift_unsorted_gene_order = sort_matrix_columnandindex(
                         df_matrix_frameshift_unsorted, dict_filter_num_lineage)
+                    # also sort mutations according to gene presence in the genome (https://www.ncbi.nlm.nih.gov/pmc/articles/PMC8067447/, Fig.1)
+                    
+                    gene_order = ['ORF1a', 'ORF1ab', 'S', 'ORF3a', 'ORF3d', 'E', 'M',
+                                  'ORF6', 'ORF7a', 'ORF7b', 'ORF8', 'ORF9b', 'ORF14', 'N', 'ORF10']
+                    aa_mutations = df_matrix_frameshift_unsorted_gene_order.index.to_list()[1:]
+                    
+                    def sort_gene_mutations(item):
+                        gene_name = item.split(':')[0]  # Extract the gene name from the item
+                        try:
+                            # Return the index of the gene name in the desired order
+                            return gene_order.index(gene_name)
+                        except ValueError:
+                            return len(gene_order)
+                    
+                    sorted_mutations = ['Number of sequences detected'] + sorted(aa_mutations, key=sort_gene_mutations)
+                    df_matrix_without_lab = df_matrix_frameshift_unsorted_gene_order.reindex(
+                        sorted_mutations)
                     
                 elif args.mutation_level == "nt":
                     df_matrix_without_lab = sort_matrix_nt_columnandindex(
                         df_matrix_frameshift_unsorted, dict_filter_num_lineage)
-
-                df_matrix = init_num_labs(df_matrix_without_lab, lab_counts)
+                
+                df_matrix_without_parent = init_num_labs(df_matrix_without_lab, lab_counts)
+                
+                #parent-child relationship
+                sublineages_list = df_matrix_without_parent.columns.to_list()
+                
+                aliasor = Aliasor() #https: // github.com/corneliusroemer/pango_aliasor
+                aliasor_uncompressed = [aliasor.uncompress(
+                    sublineage) for sublineage in sublineages_list]
+                parent_lineages = [pangolin_parent(lineage_uncompressed)
+                                for lineage_uncompressed in aliasor_uncompressed]
+                
+                parent_lineages[parent_lineages.index('other_lineages')] = '---'
+                parent_lineages_row = pd.DataFrame(
+                    [parent_lineages], columns=df_matrix_without_parent.columns)
+                parent_lineages_row.index = ['Parent lineage']
+                df_matrix = pd.concat(
+                    [parent_lineages_row, df_matrix_without_parent])
                 
                 if args.matrix:
                     print(df_matrix)
@@ -648,7 +691,7 @@ def main():
                         workbook = writer.book
                         worksheet = writer.sheets[sheet_name]
                         end = colToExcel(len(df_matrix.columns)+1) 
-                        coordinate = 'B4:' + end + str(len(df_matrix)+1)
+                        coordinate = 'B5:' + end + str(len(df_matrix)+1)
                         worksheet.conditional_format(coordinate, {'type': '2_color_scale',
                                              'min_color': 'white',
                                              'max_color': 'red'})
