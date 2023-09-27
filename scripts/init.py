@@ -51,7 +51,7 @@ def txt_to_string(mutation_file):  # 'lineages/'aa', 'lineages.txt'/'aa_changes.
         # have to consider single/combinations of mutations
         aa_change_txt = mutation_file
         list_aa_txt = Path(aa_change_txt).read_text().replace(
-            '\n', ',').split(",")[:-1]
+            '\n', ',').split(",")
         list_comb_aa = [comb for comb in list_aa_txt if " " in comb]
         list_single_aa = [
             single for single in list_aa_txt if single not in list_comb_aa]
@@ -564,8 +564,8 @@ def main():
             sorted_lineage_list = sorted(lineage_list)
             dict_filter_num_lineage = {key: dict_filter_num_lineage[key] for key in lineage_list}
             dict_filter_num_lineage = dict(sorted(dict_filter_num_lineage.items()))
-            print("Number of samples per lineage:", dict_filter_num_lineage)
-            print(dict_other_lineages)
+            #print("Number of samples per lineage:", dict_filter_num_lineage)
+            #print(dict_other_lineages)
             
             print("Compute mutation frequency ...") 
 
