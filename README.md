@@ -7,6 +7,8 @@ A covSonar Utility tool to detect character and signature mutations based on mut
 Ultimately, the same conda environment as for covsonar can be used. Otherwise there are some packages neccessary for using the tool.
 (conda export environment packages)
 
+### Install
+
 ### Input
 Dataset (national, international) 
 Timeframe 
