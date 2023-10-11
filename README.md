@@ -93,17 +93,23 @@ conda activate smfc
 
 ### 3.1 Inputformat
 
-| Lineage  |  | Mutation  | 
-| ---------|  | ---------|
-| BA.5.2.1 |  | S:D46Y |
-| BA.4.6   |  | ORF1ab:S367G   |
-| BE.1     |  | N:A679D   |
+| Lineage  |  
+| ---------|  
+| BA.5.2.1 |  
+| BA.4.6   |  
+| BE.1     |  
+
+| Mutation  |
+| ---------|
+| S:D46Y |
+| ORF1ab:S367G   |
+| N:A679D   |
 
 ### 3.2 Presence of overlap in the data 
 See https://github.com/rki-mf1/sc2-mutation-frequency-calculator/issues/4#issue-1755232495
 
 ## 4. Contribution 
-covSonar has been very carefully programmed and tested, but is still in an early stage of development. You can contribute to this project by reporting problems or writing feature requests to the issue section under https://github.com/rki-mf1/sc2-mutation-frequency-calculator/-/issues
+covSonar has been very carefully programmed and tested, but is still in an early stage of development. You can contribute to this project by reporting problems or writing feature requests to the issue section under https://github.com/rki-mf1/sc2-mutation-frequency-calculator/issues
 
 Your feedback is very welcome!
 
