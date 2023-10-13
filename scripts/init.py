@@ -30,6 +30,7 @@ from collections import defaultdict
 import matplotlib.pyplot as plt
 import math
 from pango_aliasor.aliasor import Aliasor
+from statistics import mean
 
 ########## input ############
 
@@ -674,10 +675,7 @@ def main():
                 parent_lineages_row.index = ['Parent lineage']
                 df_matrix = pd.concat(
                     [parent_lineages_row, df_matrix_without_parent])
-                
-                print(df_matrix)
-                quit()
-                df_matrix['Freq_Mean'] = df_matrix.mean()# mean nur von den Zeilen machen, die double/float enthalten
+
                 if args.matrix:
                     print(df_matrix)
                     if args.output:
@@ -725,15 +723,33 @@ def main():
 
                     #deletion average frequencies against SNPs for all lineages
                     if args.del_freq_plot:
-                        df_matrix['Freq_Mean'] = df_matrix.mean()
-                        print(df_matrix)
-                        quit()
-                        x_values, y_values = sorted_count_df['Value'], sorted_count_df['Count']
-                        plt.bar(x_values, y_values)
-                        plt.xlabel('Number of Labs')
-                        plt.ylabel('Number of Lineages')
-                        plt.title('Lab diversity')
+                        
+                        dict_mut_freq = {}
+                        for index, row in df_matrix.iloc[3:].iterrows():
+                            row_values = row.tolist()
+                            dict_mut_freq[index] = mean(row_values)
+                        
+                        dict_del_mutations = {key: value for key, value in dict_mut_freq.items() if "del" in key}
+                        dict_snp_mutations = {key: value for key, value in dict_mut_freq.items() if not "del" in key}
+                        
+                        plt.bar(list(dict_del_mutations.keys()),
+                                list(dict_del_mutations.values()))
+                        plt.xlabel('Deletion mutations')
+                        plt.ylabel('Frequency')
+                        plt.title(f'Frequency of deletions within {date_range}')
                         plt.xticks(rotation=90)
+                        plt.show()
+
+                        plt.bar(list(dict_snp_mutations.keys()),
+                                list(dict_snp_mutations.values()))
+                        plt.xlabel('Deletion mutations')
+                        plt.ylabel('Frequency')
+                        plt.title(
+                            f'Frequency of deletions within {date_range}')
+                        plt.xticks(rotation=90)
+                        plt.show()
+
+                        quit()
                         if args.output:
                             plt.savefig(f"output/matrix/{args.output}.png")
                         else:
@@ -997,6 +1013,7 @@ def main():
                     if args.output:
                         outpath = fasta_dir + args.output
                     else:
+                        date_range = date_range.replace(":", "_")
                         outpath = fasta_dir + date_range
 
                     if not os.path.exists(outpath + '/'):
@@ -1005,7 +1022,7 @@ def main():
                     df_created_consensus_mutations = create_consensus(file_in, outpath, df_lineage_mutation_frequency, cut_off_frequency)
                     
                     records = []
-                    for filename in os.listdir(fasta_dir):
+                    for filename in os.listdir(outpath):
                         if filename.endswith(".fasta") or filename.endswith(".fa"):
                             filepath = os.path.join(fasta_dir, filename)
                             for record in SeqIO.parse(filepath, "fasta"):
@@ -1013,9 +1030,10 @@ def main():
 
                     # Write the merged fasta sequences to a new file
                     if args.output:
-                        multi_fasta = f"{outpath}/{args.output}_multi.fasta"
+                        multi_fasta = f"{args.output}/{args.output}_multi.fasta"
                     else:
-                        multi_fasta = f"{outpath}/{outpath}_multi.fasta"
+                        date_range = date_range.replace(":","_")
+                        multi_fasta = f"{outpath}/{date_range}_multi.fasta"
 
                     with open(multi_fasta, "w") as f:
                         SeqIO.write(records, f, "fasta")
