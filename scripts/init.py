@@ -709,6 +709,7 @@ def main():
                         worksheet.conditional_format(coordinate, {'type': '2_color_scale',
                                              'min_color': 'white',
                                              'max_color': 'red'})
+                        worksheet.write('A1', date_range)
                         writer.save()
 
                     if args.lab_plot:
@@ -737,7 +738,8 @@ def main():
                             plt.savefig(f"output/matrix/{date_range}_labdiversity.png")
                         
                 elif args.signature:
-                    df_matrix = df_matrix.tail(-1)
+                    # try out for input/tsv/2023-10-11_gisaid_ww-check_2023-09-11_2023-10-11.tsv
+                    df_matrix = df_matrix.tail(-3)
                     lineages_of_interest = df_matrix.columns.to_list()
                     #count values (in how many lineages a mutations occurs > threshold) along the frequencies 
                     counts = (df_matrix >= args.cut_off_frequency).sum(axis=1)
@@ -749,16 +751,12 @@ def main():
                     count_freq_table['lineages'] = df_matrix.apply(lambda x: x.index[x >= args.cut_off_frequency].to_list(), axis=1)
                     count_freq_table_sort = count_freq_table.sort_values(by=['count', 'frequency'], ascending=[True, False])
                     count_freq_table_sort['frequency'] = count_freq_table_sort['frequency'].apply(list)
-                    print(count_freq_table_sort)
-                    
-                    print(lineages_of_interest)
-                    print(len(lineages_of_interest))
 
                     #count = 1
                     single_signature_table = count_freq_table_sort[count_freq_table_sort['count'] == 1]
                     single_signature_table['lineages'] = single_signature_table['lineages'].apply(lambda x: x[0])
                     unique_lineages = single_signature_table['lineages'].unique() #vorkommen können aus count tabelle raus
-                    #print("\n", "Unique lineages, die single signature haben: ", unique_lineages, "\n")
+                    print("\n", "Unique lineages, die single signature haben: ", unique_lineages, "\n")
                     
                     print(single_signature_table)
                     df_signature_mutations = pd.DataFrame(
