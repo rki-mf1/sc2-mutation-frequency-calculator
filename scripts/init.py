@@ -731,12 +731,52 @@ def main():
                         else: 
                             plt.xlabel('Number of Countries')
                             plt.title('Country diversity')
-                            
+                        
+                        # deletion average frequencies against SNPs for all lineages
+                    if args.del_freq_plot:
+                        df_matrix['Freq_Mean'] = df_matrix.mean()
+                        print(df_matrix)
+                        quit()
+                        x_values, y_values = sorted_count_df['Value'], sorted_count_df['Count']
+                        plt.bar(x_values, y_values)
+                        plt.xlabel('Number of Labs')
+                        plt.ylabel('Number of Lineages')
+                        plt.title('Lab diversity')
+
+                        dict_mut_freq = {}
+                        for index, row in df_matrix.iloc[3:].iterrows():
+                            row_values = row.tolist()
+                            dict_mut_freq[index] = mean(row_values)
+
+                        dict_del_mutations = {
+                            key: value for key, value in dict_mut_freq.items() if "del" in key}
+                        dict_snp_mutations = {
+                            key: value for key, value in dict_mut_freq.items() if not "del" in key}
+
+                        plt.bar(list(dict_del_mutations.keys()),
+                                list(dict_del_mutations.values()))
+                        plt.xlabel('Deletion mutations')
+                        plt.ylabel('Frequency')
+                        plt.title(
+                            f'Frequency of deletions within {date_range}')
+                        plt.xticks(rotation=90)
+                        plt.show()
+
+                        plt.bar(list(dict_snp_mutations.keys()),
+                                list(dict_snp_mutations.values()))
+                        plt.xlabel('Deletion mutations')
+                        plt.ylabel('Frequency')
+                        plt.title(
+                            f'Frequency of deletions within {date_range}')
+                        plt.xticks(rotation=90)
+                        plt.show()
+
                         if args.output:
                             plt.savefig(f"output/matrix/{args.output}.png")
                         else:
                             plt.savefig(f"output/matrix/{date_range}_labdiversity.png")
-                        
+                    
+
                 elif args.signature:
                     # try out for input/tsv/2023-10-11_gisaid_ww-check_2023-09-11_2023-10-11.tsv
                     df_matrix = df_matrix.tail(-3)
@@ -868,18 +908,77 @@ def main():
                     sample_size_factor = 1/2  
                     print(f"Bootstrap treshold: {bootstrap_threshold}, the sample size will be reduced by: {sample_size_factor}")
 
-                    dict_filter_num_lineage = dict(sorted(dict_filter_num_lineage.items(), key=lambda x: x[1], reverse=True))
-                    sorted_lineage_list = list(dict_filter_num_lineage.keys())
+                    #dict_filter_num_lineage = dict(sorted(dict_filter_num_lineage.items(), key=lambda x: x[1], reverse=True))
+                    #sorted_lineage_list = list(dict_filter_num_lineage.keys())
                     
                     df_bootstrap_lineages = pd.DataFrame(columns=['Lineages', 'Sample_size', 'Reduction_factor', 'Bootstrap_value'])
+                    num_reflect_ground_truth = []
+                    rat_reflect_ground_truth = []
                     for lineage in sorted_lineage_list:
-                        #print(f"---{lineage}---")
+                        print(f"---{lineage}---")
                         sample_size = dict_num_lineage[lineage]
                         df_lineage_mutation_profile = df_dna_aa_profile[
-                            df_dna_aa_profile['lineage'] == lineage]
+                            df_dna_aa_profile['lineage'] == lineage][['lineage', 'dna_profile']]
                         ground_truth = df_lineage_mutation_frequency.index[df_lineage_mutation_frequency[lineage]
                                                             >= bootstrap_threshold].tolist()
                         sample_size = math.floor(sample_size*sample_size_factor)
+                        ground_truth = sorted(
+                            ground_truth, key=lambda x: int(re.search(r'\d+', x).group()))
+                        #print(ground_truth)
+                    # presence/absence vector matrix for each sample of a lineage with aggregated count
+                        #print(f"Ground truth for lineage {lineage}: ", ground_truth)
+                        mutation_profile_aggregated = df_lineage_mutation_profile['dna_profile'].str.split(
+                        )
+                        df_presence_absence = pd.DataFrame([[col in row for col in ground_truth]
+                                                            for row in mutation_profile_aggregated], columns=ground_truth, dtype=int)
+                        df_presence_absence['Count'] = df_presence_absence.sum(
+                            axis=1)
+                        df_presence_absence = df_presence_absence.sort_values(
+                            by='Count', ascending=False).reset_index(drop=True)
+                        count_equal_length = (
+                            df_presence_absence['Count'] == len(ground_truth)).sum()
+                        print(df_presence_absence)
+                        date_range = date_range.replace(":", "_")
+                        if not os.path.exists(f"output/presence_absence/{date_range}/"):
+                            os.makedirs(
+                                f"output/presence_absence/{date_range}/")
+                        df_presence_absence.to_csv(f"output/presence_absence/{date_range}/presence-absence_{lineage}_{date_range}.csv",index=False)
+                        num_reflect_ground_truth.append(count_equal_length)
+                        rat_reflect_ground_truth.append(
+                            count_equal_length/dict_filter_num_lineage[lineage])
+                        #print(f"Number of samples which exactly reflect the ground truth of {lineage}:", count_equal_length)
+                        #print(f"Ratio of samples which exactly reflect the ground truth of {lineage}:", count_equal_length/dict_filter_num_lineage[lineage])
+
+                    quit()
+                    x_values, y_values = sorted_lineage_list, num_reflect_ground_truth
+                    plt.bar(x_values, y_values)
+                    plt.xlabel('Lineages')
+                    plt.ylabel(
+                        'Number of samples exactly reflect the ground truth')
+                    plt.title('Determining minimum sample size')
+                    overall_sample_size = list(
+                        dict_filter_num_lineage.values())
+                    for x, y, add_val in zip(x_values, y_values, overall_sample_size):
+                        plt.text(x, y, str(add_val), ha='center', va='bottom')
+                    plt.xticks(rotation=90)
+                    plt.show()
+                    a_values, b_values = sorted_lineage_list, rat_reflect_ground_truth
+                    plt.bar(a_values, b_values)
+                    plt.xlabel('Lineages')
+                    plt.ylabel(
+                        'Ratio of samples exactly reflect the ground truth over overall sample size')
+                    plt.title('Determining minimum sample size')
+                    overall_sample_size = list(
+                        dict_filter_num_lineage.values())
+                    for x, y, add_val in zip(a_values, b_values, overall_sample_size):
+                        plt.text(x, y, str(add_val), ha='center', va='bottom')
+                    plt.xticks(rotation=90)
+                    plt.show()
+
+                    '''
+                        # random bootstrap approach
+                        sample_size = math.floor(
+                            sample_size*sample_size_factor)
                         dict_filter_num_lineage[lineage] = sample_size
                         
                         df_lineage_sample = pd.DataFrame(columns=['Lineages', 'Sample_size', 'Reduction_factor', 'Bootstrap_value'])
@@ -927,6 +1026,7 @@ def main():
                     plt.title('Random Bootstrap for determining minimum sample size') 
                     plt.savefig(
                         f"output/bootstrap/{date_range}/2023-09-06_accession-all_min-sample-size_cut-off-0-75.png")
+                '''
                 
                 else: 
                     print("creating consensus sequences...")
