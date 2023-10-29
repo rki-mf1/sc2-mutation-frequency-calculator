@@ -753,6 +753,7 @@ def main():
                             plt.title('Country diversity')
                         
                         # deletion average frequencies against SNPs for all lineages
+                    '''
                     if args.del_freq_plot:
                         df_matrix['Freq_Mean'] = df_matrix.mean()
                         print(df_matrix)
@@ -795,7 +796,7 @@ def main():
                             plt.savefig(f"output/matrix/{args.output}.png")
                         else:
                             plt.savefig(f"output/matrix/{date_range}_labdiversity.png")
-                    
+                    '''
                 elif args.signature:
                     # try out for input/tsv/2023-10-11_gisaid_ww-check_2023-09-11_2023-10-11.tsv
                     df_matrix = df_matrix.tail(-3)
