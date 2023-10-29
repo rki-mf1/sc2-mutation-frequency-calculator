@@ -28,7 +28,7 @@ import xlsxwriter
 from itertools import combinations
 from collections import defaultdict
 import matplotlib.pyplot as plt
-from matplotlib_venn import venn2_unweighted
+#from matplotlib_venn import venn2_unweighted
 import math
 from pango_aliasor.aliasor import Aliasor
 
@@ -1082,6 +1082,7 @@ def main():
                     list_treeshrink_removed_c2_same = [
                         item for item in list_treeshrink_removed_c2 if item in list_all_intersected_lineages]
                     
+                    '''
                     venn2_unweighted([set(list_treeshrink_removed_c1), set(list_treeshrink_removed_c2)], ('C1', 'C2'))
                     plt.title(
                         "Removed lineages by treeshrink from UShER and C^2 phylotree")
@@ -1090,7 +1091,7 @@ def main():
                     venn2_unweighted([set(list_treeshrink_removed_c1_same), set(list_treeshrink_removed_c2_same)], ('C1', 'C2'))
                     plt.title("Removed lineages by treeshrink from UShER and C^2 phylotree (same lineages)")
                     plt.savefig("input/phylotree_usher_c2/venn_treeshrink-result_same-lineages.png")
-                    
+                    '''
 
                 else: 
                     print("creating consensus sequences...")
