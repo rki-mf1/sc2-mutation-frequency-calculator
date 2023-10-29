@@ -28,6 +28,7 @@ import xlsxwriter
 from itertools import combinations
 from collections import defaultdict
 import matplotlib.pyplot as plt
+from matplotlib_venn import venn2_unweighted
 import math
 from pango_aliasor.aliasor import Aliasor
 
@@ -84,6 +85,21 @@ def colToExcel(col):  # col is 1 based
 
     return excelCol
 
+
+def list_files_in_directory(path):
+    # Check if the path exists
+    if not os.path.exists(path):
+        print(f"The path '{path}' does not exist.")
+        return []
+
+    # Use os.listdir to get a list of filenames in the directory
+    filenames = os.listdir(path)
+
+    # Filter out subdirectories and only keep files
+    files = [filename for filename in filenames if os.path.isfile(
+        os.path.join(path, filename))]
+
+    return files
 ########## main functionality ############
 
 def init_num_lineages(sample_column, mutation_profile):
@@ -444,6 +460,8 @@ def main():
                         help='optional: will create consensus sequences based on given lineages')
     parser.add_argument('-rb', '--bootstrap', required=False, action='store_true',
                         help='optional: will apply ranom bootstrap method to determine sufficient cut-off for minimum sample size per lineage')
+    parser.add_argument('-tcd', '--treeshrink_cirlce_diagram', required=False, action='store_true',
+                        help='optional: will plot a circle diagram, to compare phylotrees based on UShER and C^2 by checking which lineages are removed by treeshrink')
     parser.add_argument('-check', '--consensus_check', required=False, action='store_true',
                         help='optional: alterate path to check whether the created consensus seqs have the right mutations')
     parser.add_argument('-warning', '--mutation_warning', required=False, action='store_true',
@@ -454,6 +472,8 @@ def main():
                         help='optional: set threshold for number of samples sequenced from a lineage')
     parser.add_argument('-sig', '--signature', required=False, action='store_true',
                         help='optional: for given (set of) lineage return the set of signature mutations')
+    parser.add_argument('-is', '--ignore_sublineages', required=False, action='store_true',
+                        help='optional: will ignore sublineages, to compute signature mutations for lineage-complexes')
     parser.add_argument('-out', '--output', metavar='', required=False,
                         help='optional: set filename for Covsonar output')
     parser.add_argument('-level', '--mutation_level', metavar='', required=False,
@@ -690,7 +710,7 @@ def main():
                 if args.matrix:
                     print(df_matrix)
                     if args.output:
-                        outfile = 'output/matrix/' + args.output
+                        outfile = args.output
                     else:
                         outfile = 'output/matrix/' + \
                             date_range.replace(":", "_") + '.xlsx'
@@ -776,15 +796,23 @@ def main():
                         else:
                             plt.savefig(f"output/matrix/{date_range}_labdiversity.png")
                     
-
                 elif args.signature:
                     # try out for input/tsv/2023-10-11_gisaid_ww-check_2023-09-11_2023-10-11.tsv
                     df_matrix = df_matrix.tail(-3)
                     lineages_of_interest = df_matrix.columns.to_list()
-                    #count values (in how many lineages a mutations occurs > threshold) along the frequencies 
+
+                    #if args.ignore_sublineages
+                    #changes shape of matrix, less columns since sublineages will be removed
+
+                    print(df_matrix)
+                    columns_to_delete = ['HK.3', 'JG.3']
+                    df_matrix.drop(columns=columns_to_delete, inplace=True)
+
+                    #count values (in how many lineages a mutations is characteristic)
                     counts = (df_matrix >= args.cut_off_frequency).sum(axis=1)
                     frequencies = df_matrix[df_matrix >= args.cut_off_frequency].apply(
                         lambda row: row[row.notnull()].tolist(), axis=1)
+                    #count and frequencies depict df_matrix
                     count_freq_table = pd.DataFrame(
                         {'count': counts, 'frequency': frequencies})
                     count_freq_table['frequency'] = count_freq_table['frequency'].apply(tuple)
@@ -796,6 +824,7 @@ def main():
                     single_signature_table = count_freq_table_sort[count_freq_table_sort['count'] == 1]
                     single_signature_table['lineages'] = single_signature_table['lineages'].apply(lambda x: x[0])
                     unique_lineages = single_signature_table['lineages'].unique() #vorkommen können aus count tabelle raus
+                
                     print("\n", "Unique lineages, die single signature haben: ", unique_lineages, "\n")
                     
                     print(single_signature_table)
@@ -828,7 +857,7 @@ def main():
                         "\n", "Unique lineages, die single signature haben: ", unique_lineages, "\n")
                     loi_find_combinations = [item for item in lineages_of_interest if item not in unique_lineages]
                     print("Lineages which need a combination of signature mutations: ",loi_find_combinations)
-
+                    
                     combination_signature_table = count_freq_table_sort[count_freq_table_sort['count'] != 1]
                     combination_signature_filtered = combination_signature_table[~combination_signature_table['lineages'].apply(lambda x: set(x).issubset(unique_lineages))]
                     combination_signature_filtered[['frequency', 'lineages']] = combination_signature_filtered.apply(lambda row: pd.Series(
@@ -949,7 +978,7 @@ def main():
                         #print(f"Number of samples which exactly reflect the ground truth of {lineage}:", count_equal_length)
                         #print(f"Ratio of samples which exactly reflect the ground truth of {lineage}:", count_equal_length/dict_filter_num_lineage[lineage])
 
-                    quit()
+                    ''' #bootstrap approach
                     x_values, y_values = sorted_lineage_list, num_reflect_ground_truth
                     plt.bar(x_values, y_values)
                     plt.xlabel('Lineages')
@@ -975,7 +1004,7 @@ def main():
                     plt.xticks(rotation=90)
                     plt.show()
 
-                    '''
+                    
                         # random bootstrap approach
                         sample_size = math.floor(
                             sample_size*sample_size_factor)
@@ -1028,6 +1057,41 @@ def main():
                         f"output/bootstrap/{date_range}/2023-09-06_accession-all_min-sample-size_cut-off-0-75.png")
                 '''
                 
+                elif args.treeshrink_cirlce_diagram: 
+                    directory_path = "output/consensus/2023-09-02_desh-accesions-all_cut-lin-5_consensus-squared/"
+                    file_list = list_files_in_directory(directory_path)
+                    if file_list:
+                        list_all_intersected_lineages = [filename.split("_")[2].rsplit(".", 1)[
+                            0] for filename in file_list]
+                    else:
+                        print("No files found in the directory.")
+                    
+                    df_treeshrink_removed_c1 = pd.read_table('input/phylotree_usher_c2/treeshrink_removed_c1.tsv', low_memory=False)
+                    list_treeshrink_removed_c1 = sorted(df_treeshrink_removed_c1['lineage'].unique())
+                    list_treeshrink_removed_c1_same = [
+                        item for item in list_treeshrink_removed_c1 if item in list_all_intersected_lineages]
+                    
+                    file_path = "input/phylotree_usher_c2/removed_cut-lin-10.txt"
+                    with open(file_path, 'r') as file:
+                        # 2. Read the file's contents
+                        file_contents = file.read()
+                    list_treeshrink_removed_c2 = file_contents.split('\t')
+                    if list_treeshrink_removed_c2[-1] == '\n':
+                        list_treeshrink_removed_c2.pop()
+                    list_treeshrink_removed_c2 = sorted(list_treeshrink_removed_c2)
+                    list_treeshrink_removed_c2_same = [
+                        item for item in list_treeshrink_removed_c2 if item in list_all_intersected_lineages]
+                    
+                    venn2_unweighted([set(list_treeshrink_removed_c1), set(list_treeshrink_removed_c2)], ('C1', 'C2'))
+                    plt.title(
+                        "Removed lineages by treeshrink from UShER and C^2 phylotree")
+                    plt.savefig("input/phylotree_usher_c2/venn_treeshrink-result.png")
+                    
+                    venn2_unweighted([set(list_treeshrink_removed_c1_same), set(list_treeshrink_removed_c2_same)], ('C1', 'C2'))
+                    plt.title("Removed lineages by treeshrink from UShER and C^2 phylotree (same lineages)")
+                    plt.savefig("input/phylotree_usher_c2/venn_treeshrink-result_same-lineages.png")
+                    
+
                 else: 
                     print("creating consensus sequences...")
                     file_in = 'data/NC_045512.2.fasta.txt'
