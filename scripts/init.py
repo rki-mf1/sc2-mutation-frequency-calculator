@@ -15,7 +15,6 @@ from Bio import SeqIO
 from collections import Counter
 import itertools
 import numpy as np
-import pandas as pd 
 import yaml 
 import os.path 
 import argparse
@@ -28,9 +27,10 @@ import xlsxwriter
 from itertools import combinations
 from collections import defaultdict
 import matplotlib.pyplot as plt
-#from matplotlib_venn import venn2_unweighted
 import math
 from pango_aliasor.aliasor import Aliasor
+import json
+from scipy.spatial.distance import hamming
 
 ########## input ############
 
@@ -458,6 +458,8 @@ def main():
                         help='optional: plot about how many lineages coming from how many laboratories')
     parser.add_argument('-con', '--consensus', required=False, action='store_true',
                         help='optional: will create consensus sequences based on given lineages')
+    parser.add_argument('-ic', '--identity_cut_off', required=False, action='store_true',
+                        help='optional: will evaluate the performance of the identity cut-off (default 75%) and calculate precision and recall')
     parser.add_argument('-rb', '--bootstrap', required=False, action='store_true',
                         help='optional: will apply ranom bootstrap method to determine sufficient cut-off for minimum sample size per lineage')
     parser.add_argument('-tcd', '--treeshrink_cirlce_diagram', required=False, action='store_true',
@@ -479,6 +481,7 @@ def main():
     parser.add_argument('-level', '--mutation_level', metavar='', required=False,
                         help='optional: choose mutation level to get either aa or nt mutation frequencies')
     args = parser.parse_args()
+    
     
     #load yml file 
     with open("config/config.yml", "r") as ymlfile:
@@ -562,7 +565,7 @@ def main():
             min_date, max_date = df_mutation_profile['date'].min(), df_mutation_profile['date'].max()
             date_range = f"{min_date.strftime('%Y-%m-%d')}:{max_date.strftime('%Y-%m-%d')}"
             print("Time Period:", date_range)
-                        
+
             print("Absolut number of sequenced lineages will be counted...")
             df_dna_aa_profile, dict_num_lineage = init_num_lineages('lineage', args.mutation_profile)
 
@@ -596,7 +599,7 @@ def main():
                 print("Matrix will be created on the fly..")
 
                 # column "other lineages"
-                lineage_list.append("other_lineages")
+                sorted_lineage_list.append("other_lineages")
                 other_lineages_samples = sum(dict_other_lineages.values())
                 dict_filter_num_lineage['other_lineages'] = other_lineages_samples
                 df_dna_aa_profile['lineage'] = df_dna_aa_profile['lineage'].apply(
@@ -798,31 +801,61 @@ def main():
                             plt.savefig(f"output/matrix/{date_range}_labdiversity.png")
                     '''
                 elif args.signature:
-                    # try out for input/tsv/2023-10-11_gisaid_ww-check_2023-09-11_2023-10-11.tsv
                     df_matrix = df_matrix.tail(-3)
-                    lineages_of_interest = df_matrix.columns.to_list()
+                    target_lineages = df_matrix.columns.to_list()[:-1]
+                    
+                    if args.cut_off_frequency:
+                        frequency_cut_off = args.cut_off_frequency
+                    else:
+                        frequency_cut_off = 0.75
 
-                    #if args.ignore_sublineages
-                    #changes shape of matrix, less columns since sublineages will be removed
+                    if args.ignore_sublineages:
+                        #1) group lineage-complexed according to their (obvious) hierachical order
+                        obv_hierachy_lineages = {}
+                        for lineage in target_lineages:
+                            prefix = lineage.split('.', 2)[:2]  # Get prefix until the second dot
+                            prefix = '.'.join(prefix)
+                            if prefix not in obv_hierachy_lineages:
+                                obv_hierachy_lineages[prefix] = []
+                            obv_hierachy_lineages[prefix].append(lineage)
+                        sublineages_to_delete = [col for cols in obv_hierachy_lineages.values() if len(cols) >= 2 for col in cols[1:]] 
+                        df_matrix.drop(sublineages_to_delete, axis=1, inplace=True)
+                        
+                        #2) apply either Aliasor or Yusras Script or https://github.com/cov-lineages/pangolin-data/blob/main/pangolin_data/data/alias_key.json
+                        sublineages_sus = [col for cols in obv_hierachy_lineages.values() if len(cols) == 1 for col in cols]
+                        sublineages_prefix = ['.'.join(col.split('.')[:2]) if col.count('.') > 1 else col for col in sublineages_sus]
+                        parent_of_sublineages = [aliasor.parent(col) for col in sublineages_prefix]
+                        print(parent_of_sublineages)
+                        target_lineages = df_matrix.columns.to_list()[:-1]
+                        quit()
 
-                    print(df_matrix)
-                    columns_to_delete = ['HK.3', 'JG.3']
-                    df_matrix.drop(columns=columns_to_delete, inplace=True)
 
-                    #count values (in how many lineages a mutations is characteristic)
-                    counts = (df_matrix >= args.cut_off_frequency).sum(axis=1)
-                    frequencies = df_matrix[df_matrix >= args.cut_off_frequency].apply(
+
+
+
+                    ##############count values (in how many lineages a mutations is characteristic)
+                    #due to aggregation of lineage complexes some mutations could be lost their characteristic properties
+                    df_filtered = df_matrix.dropna(how='all')
+                    df_matrix = df_filtered.loc[~(df_filtered.eq(0) | df_filtered.isnull()).all(axis=1)]
+                  
+                    counts = (df_matrix >= frequency_cut_off).sum(axis=1)
+                    frequencies = df_matrix[df_matrix >= frequency_cut_off].apply(
                         lambda row: row[row.notnull()].tolist(), axis=1)
+                    
                     #count and frequencies depict df_matrix
                     count_freq_table = pd.DataFrame(
                         {'count': counts, 'frequency': frequencies})
                     count_freq_table['frequency'] = count_freq_table['frequency'].apply(tuple)
-                    count_freq_table['lineages'] = df_matrix.apply(lambda x: x.index[x >= args.cut_off_frequency].to_list(), axis=1)
+                    count_freq_table['lineages'] = df_matrix.apply(lambda x: x.index[x >= frequency_cut_off].to_list(), axis=1)
                     count_freq_table_sort = count_freq_table.sort_values(by=['count', 'frequency'], ascending=[True, False])
                     count_freq_table_sort['frequency'] = count_freq_table_sort['frequency'].apply(list)
 
                     #count = 1
                     single_signature_table = count_freq_table_sort[count_freq_table_sort['count'] == 1]
+                    print(df_matrix)
+                    print(aliasor.parent('HK.3'))
+                    print(single_signature_table)
+                    quit()
                     single_signature_table['lineages'] = single_signature_table['lineages'].apply(lambda x: x[0])
                     unique_lineages = single_signature_table['lineages'].unique() #vorkommen können aus count tabelle raus
                 
@@ -856,7 +889,7 @@ def main():
                     
                     print(
                         "\n", "Unique lineages, die single signature haben: ", unique_lineages, "\n")
-                    loi_find_combinations = [item for item in lineages_of_interest if item not in unique_lineages]
+                    loi_find_combinations = [item for item in target_lineages if item not in unique_lineages]
                     print("Lineages which need a combination of signature mutations: ",loi_find_combinations)
                     
                     combination_signature_table = count_freq_table_sort[count_freq_table_sort['count'] != 1]
@@ -890,47 +923,76 @@ def main():
                                 if condition_met:
                                     break
                                 k+=1
-                        
-            
-                    """
-                        k = 2
-
-                        if not df_loi_selected.empty:
-                            pairwise_combinations_loi = list(combinations(
-                                df_loi_selected.index, 2)) 
-                    quit()
-                    for loi in loi_find_combinations:    
-                        df_loi_selected = combination_signature_filtered[combination_signature_filtered['lineages'].apply(
-                            lambda x: loi in x)]
-                        
-                        if not df_loi_selected.empty:
-                            pairwise_combinations_loi = list(combinations(
-                                df_loi_selected.index, 2)) #n(n-1)/2
-                            
-                            signature_combinations_loi = []
-                            for pair in pairwise_combinations_loi:
-                                list1 = df_loi_selected.loc[pair[0], 'lineages']
-                                list2 = df_loi_selected.loc[pair[1], 'lineages']
-                                intersection = set(list1) & set(list2)
-                                if len(intersection) == 1 and loi in intersection:
-                                    signature_combinations_loi.append(pair)
-                            if signature_combinations_loi:
-                                print(loi)
-                                print(signature_combinations_loi)
-                            else:
-                                print(
-                                    f"no signature mutations for {loi} found")
-                        else:
-                            print(f"no signature mutations for {loi} found")
-                    """
+                    
+                    #if args.benchmark
+                    # cumulative distribution
+                    # x-axis: k combinatorial signature mutations
+                    # y-axis: either runtime or number of lineages were assigned by signature mutations
 
             elif args.consensus: 
                 print("Mutation Frequency per lineage will be computed..")
+                #other_lineages
+                sorted_lineage_list.append("other_lineages")
+                other_lineages_samples = sum(dict_other_lineages.values())
+                dict_filter_num_lineage['other_lineages'] = other_lineages_samples
+                df_mutation_profile['lineage'] = df_mutation_profile['lineage'].apply(
+                    lambda x: 'other_lineages' if x in dict_other_lineages else x)
                 
                 df_lineage_mutation_frequency = lineage_mutation_frequency(
                     "dna_profile", df_dna_aa_profile, sorted_lineage_list, dict_filter_num_lineage)
                 num_of_lineages = len(sorted_lineage_list)
-                
+
+                if args.identity_cut_off:
+                    all_c2_mutations = []
+                    lineage_char_mutations = {}
+                    for lineage in df_lineage_mutation_frequency.columns:
+                        char_mutations = df_lineage_mutation_frequency.index[df_lineage_mutation_frequency[lineage] >= 0.75].tolist()
+                        all_c2_mutations.append(char_mutations)
+                        lineage_char_mutations[lineage] = char_mutations
+                    all_c2_mutations = [item for sublist in all_c2_mutations for item in sublist]
+                    all_unique_c2_mutations = sorted(list(dict.fromkeys(all_c2_mutations)))
+                    
+                    binary_dict = {}
+                    for lineage, mutations in lineage_char_mutations.items():
+                        binary_values = [1 if mutation in mutations else 0 for mutation in all_unique_c2_mutations]
+                        binary_dict[lineage] = binary_values
+                    binary_consensus_profiles = pd.DataFrame.from_dict(binary_dict, orient='index', columns=all_unique_c2_mutations)
+                    
+
+                    df_mutation_profile["dna_profile"] = df_mutation_profile["dna_profile"].str.split()
+                    binary_sample_profiles = pd.DataFrame(0, columns=all_unique_c2_mutations, index=df_mutation_profile['lineage'])
+                    
+                    for index, row in df_mutation_profile.iterrows():
+                        binary_sample_profiles.loc[row['lineage'], row['dna_profile']] = 1
+                    binary_sample_profiles = binary_sample_profiles.fillna(0).astype(int)
+                    sorted_columns = binary_consensus_profiles.columns.intersection(binary_sample_profiles.columns).tolist()
+                    binary_sample_profiles = binary_sample_profiles.reindex(columns=sorted_columns)
+                    print(binary_sample_profiles)
+                    print(binary_consensus_profiles)
+
+                    t_p = 0
+                    t_n = 0
+                    for actual_lineage, row1 in binary_sample_profiles.iterrows():
+                        min_distance = float('inf')  # Initialize minimum distance to infinity
+                        closest_row_index = None
+
+                        # Iterate through each row in df2 to find the closest row
+                        for predicted_lineage, row2 in binary_consensus_profiles.iterrows():
+                            distance = hamming(row1, row2)
+                            if distance > len(binary_consensus_profiles.columns) *(3/4):
+                                print("Sample will not be assigned")
+                            else:
+                                if distance < min_distance:
+                                    min_distance = distance
+                                    #print(f"actual lineage:{actual_lineage} -> predicted:{predicted_lineage}")
+                                    if actual_lineage == closest_row_index:
+                                        t_p +=1
+                                    else:
+                                        t_n += 1
+                    precision = t_p/(t_p + t_n)
+                    print("Precision: ", precision)
+                    
+                quit()
                 if args.bootstrap:
                     print("random bootstrap method determines minimum sample size per lineage...")
 
