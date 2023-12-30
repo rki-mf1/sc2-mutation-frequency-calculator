@@ -33,6 +33,9 @@ import json
 from scipy.spatial.distance import hamming
 from scipy.spatial.distance import pdist, squareform
 from sklearn.model_selection import KFold
+from joblib import Parallel, delayed
+import random
+
 
 ########## input ############
 
@@ -61,6 +64,17 @@ def txt_to_string(mutation_file):  # 'lineages/'aa', 'lineages.txt'/'aa_changes.
         list_single_aa = ' '.join(list_single_aa)
         mutation_string = [list_single_aa, list_comb_aa]
     return mutation_string
+
+def extract_position(mut):
+    if mut.startswith('del'):
+        return int(mut.split(':')[1])  # Extract position for deletions
+    else:
+        return int(''.join(filter(str.isdigit, mut)))
+    
+def custom_sort_key(mut):
+    alt = mut[0]  # Get the ALT value
+    position = extract_position(mut)  # Get the position
+    return alt, position  # Sort by ALT first, then by position
 
 #for cut_off to be between 0.0 and 1.0
 def restricted_float(x):
@@ -102,6 +116,22 @@ def list_files_in_directory(path):
         os.path.join(path, filename))]
 
     return files
+
+
+def find_min_hamming_distance(sequence_row, df_consensus):
+    min_distance = float('inf')
+    dict_c2_distance = {}
+    for c2, consensus_row in df_consensus.iterrows():
+        distance = hamming(sequence_row, consensus_row)
+        dict_c2_distance[c2] = distance
+        min_distance = min(dict_c2_distance.values(), default=float('inf'))
+        if min_distance <= 4:
+            minimal_lineages = [lineage for lineage, distance in dict_c2_distance.items() if distance == min_distance]
+            predicted_lineage = minimal_lineages[0] if len(minimal_lineages) == 1 else " "
+        else:
+            predicted_lineage = " "
+    return predicted_lineage
+
 ########## main functionality ############
 
 def init_num_lineages(sample_column, mutation_profile):
@@ -459,8 +489,10 @@ def main():
                         help='optional: plot about how many lineages coming from how many laboratories')
     parser.add_argument('-con', '--consensus', required=False, action='store_true',
                         help='optional: will create consensus sequences based on given lineages')
-    parser.add_argument('-ic', '--identity_cut_off', required=False, action='store_true',
-                        help='optional: will evaluate the performance of the identity cut-off (default 75%) and calculate precision and recall')
+    parser.add_argument('-fc', '--verify_frequency_cut_off', required=False, action='store_true',
+                        help='optional: will evaluate the performance of the frequency cut-off (default 75%) by calculating precision and recall')
+    parser.add_argument('-cv', '--cross_validation', required=False, action='store_true',
+                        help='optional: 10-fold cross-validation of verifiying the frequency cut-off')
     parser.add_argument('-rb', '--bootstrap', required=False, action='store_true',
                         help='optional: will apply ranom bootstrap method to determine sufficient cut-off for minimum sample size per lineage')
     parser.add_argument('-tcd', '--treeshrink_cirlce_diagram', required=False, action='store_true',
@@ -589,7 +621,7 @@ def main():
                 lineage_list = list(dict_filter_num_lineage.keys())
             
             sorted_lineage_list = sorted(lineage_list)
-            dict_filter_num_lineage = {key: dict_filter_num_lineage[key] for key in lineage_list}
+            dict_filter_num_lineage = {key: dict_filter_num_lineage[key] for key in sorted_lineage_list}
             dict_filter_num_lineage = dict(sorted(dict_filter_num_lineage.items()))
             #print("Number of samples per lineage:", dict_filter_num_lineage)
             #print(dict_other_lineages)
@@ -600,6 +632,7 @@ def main():
                 print("Matrix will be created on the fly..")
 
                 # column "other lineages"
+                #lineage_list.append("other_lineages")
                 sorted_lineage_list.append("other_lineages")
                 other_lineages_samples = sum(dict_other_lineages.values())
                 dict_filter_num_lineage['other_lineages'] = other_lineages_samples
@@ -615,7 +648,7 @@ def main():
                 if not df_mutation_profile['lab'].isnull().values.all():
                     database = "desh"
                     selected_mutation_profile = df_mutation_profile.loc[df_mutation_profile['lineage'].isin(
-                        lineage_list), ['lab', 'lineage']]
+                        sorted_lineage_list), ['lab', 'lineage']]
                     lab_zip_counts = selected_mutation_profile.groupby('lineage')[
                     'lab'].nunique()
                     
@@ -625,16 +658,16 @@ def main():
                                 f"Warning: {lineage} comes from only {lab_count} labs! Note, that {lineage} is not excluded from further analysis but should be considered critically.")
                 else:
                     selected_mutation_profile = df_mutation_profile.loc[df_mutation_profile['lineage'].isin(
-                        lineage_list), ['zip', 'lineage']]
+                        sorted_lineage_list), ['zip', 'lineage']]
                     lab_zip_counts = selected_mutation_profile.groupby('lineage')[
                     'zip'].nunique()
 
                 if args.mutation_level == "aa":
                     df_lineage_mutation_frequency = lineage_mutation_frequency(
-                    "aa_profile", df_dna_aa_profile, lineage_list, dict_filter_num_lineage)
-                elif args.mutation_level == "nt":
+                    "aa_profile", df_dna_aa_profile, sorted_lineage_list, dict_filter_num_lineage)
+                elif args.mutation_level == "dna":
                     df_lineage_mutation_frequency = lineage_mutation_frequency(
-                        "dna_profile", df_dna_aa_profile, lineage_list, dict_filter_num_lineage)
+                        "dna_profile", df_dna_aa_profile, sorted_lineage_list, dict_filter_num_lineage)
                 else:
                     "MissingError: mutation level is not defined"
                 
@@ -689,28 +722,238 @@ def main():
                     df_matrix_without_lab = df_matrix_frameshift_unsorted_gene_order.reindex(
                         sorted_mutations)
                     
-                elif args.mutation_level == "nt":
+                elif args.mutation_level == "dna":
                     df_matrix_without_lab = sort_matrix_nt_columnandindex(
                         df_matrix_frameshift_unsorted, dict_filter_num_lineage)
-                
                 df_matrix_without_parent = init_num_labs(database, df_matrix_without_lab, lab_zip_counts)
-                
-                #parent-child relationship
-                sublineages_list = df_matrix_without_parent.columns.to_list()
-                
-                aliasor = Aliasor() #https: // github.com/corneliusroemer/pango_aliasor
-                aliasor_uncompressed = [aliasor.uncompress(
-                    sublineage) for sublineage in sublineages_list]
-                parent_lineages = [pangolin_parent(lineage_uncompressed)
-                                for lineage_uncompressed in aliasor_uncompressed]
-                
-                parent_lineages[parent_lineages.index('other_lineages')] = '---'
-                parent_lineages_row = pd.DataFrame(
-                    [parent_lineages], columns=df_matrix_without_parent.columns)
-                parent_lineages_row.index = ['Parent lineage']
-                df_matrix = pd.concat(
-                    [parent_lineages_row, df_matrix_without_parent])
-                
+
+                if args.verify_frequency_cut_off:
+                    df_mutation_profile_without_others = df_mutation_profile[df_mutation_profile['lineage'] != "other_lineages"].reset_index(drop=True)
+                    df_mutation_profile_without_others[f"{args.mutation_level}_profile"] = df_mutation_profile_without_others[f"{args.mutation_level}_profile"].str.split()
+                    
+                    all_characteristic_mutations = [item for sublist in df_mutation_profile_without_others[f"{args.mutation_level}_profile"].to_list() for item in sublist]
+                    all_unique_char_mutations = sorted(list(dict.fromkeys(all_characteristic_mutations)))
+                    filtered_N_all_char_mutations = [item for item in all_unique_char_mutations if 'N' not in item]
+                    filtered_N_all_char_mutations = [element for element in filtered_N_all_char_mutations if element.startswith('del') or (re.compile(r'^[a-zA-Z]+\d+[a-zA-Z]+$')).match(element)]
+                    sorted_all_unique_char_mutations = sorted(filtered_N_all_char_mutations, key=custom_sort_key)
+                    
+                    df_mutation_profile_without_others = df_mutation_profile_without_others[df_mutation_profile_without_others['dna_profile'].apply(lambda x: set(x).issubset(sorted_all_unique_char_mutations))]
+                    df_mutation_profile_without_others = df_mutation_profile_without_others[df_mutation_profile_without_others['dna_profile'].apply(len) > 0]    
+                    date_range = date_range.replace(":","_")
+                    
+                    df_matrix = df_matrix_without_parent.tail(-2)
+                    target_lineages = df_matrix.columns.to_list()[:-1]
+                    df_matrix = df_matrix[target_lineages]
+                    
+                    dict_lineage_char_mutations = {}
+                    for lineage in df_matrix.columns:
+                        char_mutations = df_matrix.index[df_matrix[lineage] >= 0.75].tolist()
+                        sorted_char_mutations = sorted(char_mutations, key=custom_sort_key)
+                        dict_lineage_char_mutations[lineage] = sorted_char_mutations
+
+                    binary_c2_profiles = pd.DataFrame(0, columns=sorted_all_unique_char_mutations, index=dict_lineage_char_mutations.keys())
+                    for lineage, mutations in dict_lineage_char_mutations.items():
+                        binary_c2_profiles.loc[lineage, mutations] = 1
+                    
+                    #fair number of cases where zero samples are correctly assigned, and all are assigned to one specific other lineage
+                    #-> distance matrix of pairwise distances between all C^2 profiles
+                    pairwise_distances = pdist(binary_c2_profiles.values, metric='hamming')
+                    distance_matrix = squareform(pairwise_distances)
+                    pairwise_distance_c2_df = pd.DataFrame(distance_matrix, columns=dict_lineage_char_mutations.keys(), index=dict_lineage_char_mutations.keys())
+                    pairwise_distance_c2_df.to_csv(f"output/frequency_verification/{date_range}/pairwise_distance_c2_{date_range}.csv")
+                    
+                    multi_class_confusion_matrix = pd.DataFrame(0, columns=dict_lineage_char_mutations.keys(), index=dict_lineage_char_mutations.keys())
+                    
+                    def calculate_confusion_matrix(row, binary_c2_profiles, sorted_all_unique_char_mutations):
+                        actual_lineage = row['lineage']
+                        binary_sample_profiles = pd.DataFrame(0, columns=sorted_all_unique_char_mutations, index=[actual_lineage])
+                        binary_sample_profiles.loc[actual_lineage, row[f"{args.mutation_level}_profile"]] = 1
+                        binary_sample_profiles = binary_sample_profiles[sorted_all_unique_char_mutations]
+                        predicted_lineage = find_min_hamming_distance(binary_sample_profiles, binary_c2_profiles)
+                        return actual_lineage, predicted_lineage
+                    
+                    '''
+                    def calculate_precision(confusion_matrix):
+                        true_positives = confusion_matrix.values.diagonal().sum()  # Get diagonal values
+                        false_positives = confusion_matrix.values.sum() - true_positives  # Sum of non-diagonal values in columns
+                        precision = true_positives / (true_positives + false_positives)
+                        return true_positives, precision
+                    '''
+
+                    def calculate_recall(confusion_matrix, num_test_samples, true_positives):
+                        false_negatives = 0
+                        for true_lineage in confusion_matrix.index:
+                            if true_lineage in list(num_test_samples.keys()):
+                                occurrences = num_test_samples[true_lineage]
+                                false_negatives += occurrences - multi_class_confusion_matrix.loc[true_lineage].sum()
+                        recall = true_positives / (true_positives + false_negatives)
+                        return recall
+
+                    # Get number of available CPU cores
+                    num_cores = 32  # Change this value based on your CPU capacity
+                    
+                    # Calculate confusion matrix in parallel
+                    results = Parallel(n_jobs=num_cores)(
+                        delayed(calculate_confusion_matrix)(row, binary_c2_profiles, sorted_all_unique_char_mutations)
+                        for _, row in df_mutation_profile_without_others.iterrows()
+                    )
+                    
+                    '''
+                    for actual_lineage, predicted_lineage in results:
+                        if actual_lineage in multi_class_confusion_matrix.index and predicted_lineage in multi_class_confusion_matrix.columns: 
+                            multi_class_confusion_matrix.loc[actual_lineage, predicted_lineage] += 1
+                    #multi_class_confusion_matrix.to_csv(f"output/frequency_verification/{date_range}/multiclass_confusion_matrix_{args.cut_off_frequency}_{date_range}.csv")
+                    '''
+                    #multiclass precision and recall 
+                    def calculate_precision_recall(confusion_matrix):
+                        precision_values = []
+                        recall_values = []
+                        for pangolin, predictions in confusion_matrix.iterrows():
+                            true_positives = predictions[pangolin]
+                            false_positives = predictions.values.sum() - true_positives
+                            precision = true_positives / (true_positives + false_positives)
+                            false_negatives = dict_filter_num_lineage[pangolin] - predictions.values.sum()
+                            recall = true_positives / (true_positives + false_negatives)
+                            precision_values.append(float(precision)), recall_values.append(float(recall))
+                            return precision_values, recall_values
+                    
+                    #precision_values, recall_values = calculate_precision_recall(multi_class_confusion_matrix)
+                    #avg_precision, avg_recall = sum(precision_values) / len(precision_values), sum(recall_values) / len(recall_values)
+                    #print(avg_precision, avg_recall)    
+                    
+                    #Random Classifier
+                    def generate_predictions(lineages):
+                        predictions = []
+                        possible_values = list(set(lineages))  # Unique values in the 'lineages' column
+                        possible_values.append('no assignment')
+
+                        for _ in range(len(lineages)):
+                            random_values = [random.choice(possible_values) for _ in range(1000)]  # Select 1000 random values
+                            avg_prediction = max(set(random_values), key=random_values.count)  # Select most frequent value
+                            predictions.append(avg_prediction)
+                        return predictions
+
+                    # Add 'predicted_lineages' column to the dataframe
+                    df_mutation_profile_without_others['predicted_lineages'] = generate_predictions(df_mutation_profile_without_others['lineage'])
+                    random_classifier = pd.DataFrame(0, columns=dict_lineage_char_mutations.keys(), index=dict_lineage_char_mutations.keys())
+                    for idx, rows in df_mutation_profile_without_others.iterrows():
+                        random_classifier.loc[rows['lineage'], rows['predicted_lineages']] += 1
+                    rc_precision_values, rc_recall_values = calculate_precision_recall(random_classifier)
+                    rc_avg_precision, rc_avg_recall = sum(rc_precision_values) / len(rc_precision_values), sum(rc_recall_values) / len(rc_recall_values)
+                    print("Precision:", rc_avg_precision, "Recall: ", rc_avg_recall)
+                    #print("Precision: ", calculate_precision(multi_class_confusion_matrix))
+                    '''
+                    plt.figure(figsize=(8, 6))
+                    plt.plot(recall_values, precision_values, marker='o', linestyle='-')
+                    plt.xlabel('Recall')
+                    plt.ylabel('Precision')
+                    plt.title('Precision-Recall trade-off curve')
+                    plt.grid(True)
+                    plt.ylim(0.0, 1.0)
+                    #plt.savefig(f"output/frequency_verification/{date_range}/precision-recall-curve_{args.cut_off_frequency}_{date_range}.png")
+                    plt.show()
+                    '''
+                    
+                    if args.cross_validation:
+                        #10-fold cross validation -> 10 multi_class_confusion_matrix
+                        #df_mutation_profile_without_others is the whole dataset that should be splitted 
+                        #no sample cut-off for splitted (traindf) to compute c^2's  
+                        kf = KFold(n_splits=10)
+                        counter=0
+                        for train, test in kf.split(df_mutation_profile_without_others):
+                            train_df, test_df = df_mutation_profile_without_others.iloc[train].reset_index(drop=True), df_mutation_profile_without_others.iloc[test].reset_index(drop=True)
+                            
+                            df_test_dna_aa_profile, dict_test_num_lineage = init_num_lineages('lineage', test_df)
+
+                            all_characteristic_mutations = [item for sublist in train_df[f"{args.mutation_level}_profile"].to_list() for item in sublist]
+                            all_unique_char_mutations = sorted(list(dict.fromkeys(all_characteristic_mutations)))
+                            filtered_N_all_char_mutations = [item for item in all_unique_char_mutations if 'N' not in item]
+                            filtered_N_all_char_mutations = [element for element in filtered_N_all_char_mutations if element.startswith('del') or (re.compile(r'^[a-zA-Z]+\d+[a-zA-Z]+$')).match(element)]
+                            sorted_all_unique_char_mutations = sorted(filtered_N_all_char_mutations, key=custom_sort_key)
+
+                            df_dna_aa_profile, dict_num_lineage = init_num_lineages('lineage', train_df)
+                            df_dna_aa_profile["dna_profile"] = df_dna_aa_profile["dna_profile"].apply(lambda x: ' '.join(x))
+                            dict_num_lineage = dict(sorted(dict_num_lineage.items()))
+                            sorted_lineage_list = list(dict_num_lineage.keys())
+
+                            df_lineage_mutation_frequency = lineage_mutation_frequency(f"{args.mutation_level}_profile", df_dna_aa_profile, sorted_lineage_list, dict_num_lineage)
+                            df_lineage_mutation_frequency = df_lineage_mutation_frequency.fillna(0)[(df_lineage_mutation_frequency.fillna(0) >= args.cut_off_frequency).any(axis=1)]
+
+                            dict_lineage_char_mutations = {}
+                            for lineage in df_lineage_mutation_frequency.columns:
+                                char_mutations = df_lineage_mutation_frequency.index[df_lineage_mutation_frequency[lineage] >= args.cut_off_frequency].tolist()
+                                sorted_char_mutations = sorted(char_mutations, key=custom_sort_key)
+                                dict_lineage_char_mutations[lineage] = sorted_char_mutations
+                                
+                            binary_c2_profiles = pd.DataFrame(0, columns=sorted_all_unique_char_mutations, index=dict_lineage_char_mutations.keys())
+                            for lineage, mutations in dict_lineage_char_mutations.items():
+                                binary_c2_profiles.loc[lineage, mutations] = 1
+
+                            multi_class_confusion_matrix = pd.DataFrame(0, columns=dict_lineage_char_mutations.keys(), index=dict_lineage_char_mutations.keys())
+                            results = Parallel(n_jobs=num_cores)(
+                                delayed(calculate_confusion_matrix)(row, binary_c2_profiles, sorted_all_unique_char_mutations)
+                                for _, row in test_df.iterrows()
+                            )
+                            
+                            for actual_lineage, predicted_lineage in results:
+                                if actual_lineage in multi_class_confusion_matrix.index and predicted_lineage in multi_class_confusion_matrix.columns: 
+                                    multi_class_confusion_matrix.loc[actual_lineage, predicted_lineage] += 1
+
+                            counter+=1
+                            precision_values = []
+                            recall_values = []
+                            for pangolin, predictions in multi_class_confusion_matrix.iterrows():
+                                true_positives = predictions[pangolin]
+                                false_positives = predictions.values.sum() - true_positives
+                                if true_positives + false_positives == 0:
+                                    precision = 0  
+                                else:
+                                    precision = true_positives / (true_positives + false_positives)
+                                
+                                false_negatives = dict_filter_num_lineage[pangolin] - predictions.values.sum()
+                                if true_positives + false_negatives == 0:
+                                    precision = 0  # Define what precision should be if denominator is zero
+                                else:
+                                    recall = true_positives / (true_positives + false_negatives)
+                                
+                                precision_values.append(float(precision)), recall_values.append(float(recall))
+                            avg_precision, avg_recall = sum(precision_values) / len(precision_values), sum(recall_values) / len(recall_values)
+                            
+                            print(counter, "Precision:", avg_precision, "Recall: ", avg_recall)
+                            
+                            #print(multi_class_confusion_matrix.values.sum())
+                            '''
+                            
+                            #print(f"Confusion matrix nr.{counter}:", "\n", multi_class_confusion_matrix)
+                            #true_positives, precision = calculate_precision(multi_class_confusion_matrix)
+                            multi_class_confusion_matrix.to_csv(f"output/frequency_verification/{date_range}/10-fold_confusion_matrix_{args.cut_off_frequency}_{counter}_{date_range}.csv")
+                            plt.figure(figsize=(8, 6))
+                            plt.plot(recall_values, precision_values, marker='o', linestyle='-')
+                            plt.xlabel('Recall')
+                            plt.ylabel('Precision')
+                            plt.title('Precision-Recall Curve')
+                            plt.grid(True)
+                            plt.ylim(0.0, 1.0)
+                            plt.savefig(f"output/frequency_verification/{date_range}/10-fold_precision-recall_{args.cut_off_frequency}_{counter}_{date_range}.png")
+                            '''
+                    quit()
+                else:
+                    #parent-child relationship
+                    sublineages_list = df_matrix_without_parent.columns.to_list()
+                    
+                    aliasor = Aliasor() #https: // github.com/corneliusroemer/pango_aliasor
+                    aliasor_uncompressed = [aliasor.uncompress(
+                        sublineage) for sublineage in sublineages_list]
+                    parent_lineages = [pangolin_parent(lineage_uncompressed)
+                                    for lineage_uncompressed in aliasor_uncompressed]
+                    
+                    parent_lineages[parent_lineages.index('other_lineages')] = '---'
+                    parent_lineages_row = pd.DataFrame(
+                        [parent_lineages], columns=df_matrix_without_parent.columns)
+                    parent_lineages_row.index = ['Parent lineage']
+                    df_matrix = pd.concat(
+                        [parent_lineages_row, df_matrix_without_parent])
+                    
                 if args.matrix:
                     print(df_matrix)
                     if args.output:
@@ -731,8 +974,8 @@ def main():
                         end = colToExcel(len(df_matrix.columns)+1) 
                         coordinate = 'B5:' + end + str(len(df_matrix)+1)
                         worksheet.conditional_format(coordinate, {'type': '2_color_scale',
-                                             'min_color': 'white',
-                                             'max_color': 'red'})
+                                            'min_color': 'white',
+                                            'max_color': 'red'})
                         worksheet.write('A1', date_range)
                         writer.save()
 
@@ -755,7 +998,7 @@ def main():
                         else: 
                             plt.xlabel('Number of Countries')
                             plt.title('Country diversity')
-                        
+                            
                         # deletion average frequencies against SNPs for all lineages
                     '''
                     if args.del_freq_plot:
@@ -829,9 +1072,6 @@ def main():
                         print(parent_of_sublineages)
                         target_lineages = df_matrix.columns.to_list()[:-1]
                         quit()
-
-
-
 
 
                     ##############count values (in how many lineages a mutations is characteristic)
@@ -933,127 +1173,6 @@ def main():
             elif args.consensus: 
                 print("Mutation Frequency per lineage will be computed..")
 
-                #if args.verify_identity_cut_off:
-                df_mutation_profile['lineage'] = df_mutation_profile['lineage'].apply(
-                    lambda x: 'other_lineages' if x in dict_other_lineages else x)
-                df_mutation_profile_without_others = df_mutation_profile[df_mutation_profile['lineage'] != "other_lineages"].reset_index(drop=True)
-                df_mutation_profile_without_others[f"{args.mutation_level}_profile"] = df_mutation_profile_without_others[f"{args.mutation_level}_profile"].str.split()
-                
-                column_mutatation_profiles = df_mutation_profile_without_others[f"{args.mutation_level}_profile"]
-                all_characteristic_mutations = [item for sublist in column_mutatation_profiles.to_list() for item in sublist]
-                all_unique_char_mutations = sorted(list(dict.fromkeys(all_characteristic_mutations)))
-                filtered_N_all_char_mutations = [item for item in all_unique_char_mutations if 'N' not in item]
-                
-                def extract_position(mut):
-                    if mut.startswith('del'):
-                        return int(mut.split(':')[1])  # Extract position for deletions
-                    else:
-                        return int(''.join(filter(str.isdigit, mut)))
-                def custom_sort_key(mut):
-                    alt = mut[0]  # Get the ALT value
-                    position = extract_position(mut)  # Get the position
-                    return alt, position  # Sort by ALT first, then by position
-                sorted_all_unique_char_mutations = sorted(filtered_N_all_char_mutations, key=custom_sort_key)
-                
-                binary_sample_profiles = pd.DataFrame(0, columns=sorted_all_unique_char_mutations, index=df_mutation_profile_without_others['lineage'])
-                for index, row in df_mutation_profile_without_others.iterrows():
-                    binary_sample_profiles.loc[row['lineage'], row[f"{args.mutation_level}_profile"]] = 1
-                binary_sample_profiles = binary_sample_profiles.sort_index()
-                
-                
-                df_lineage_mutation_frequency = lineage_mutation_frequency(
-                    f"{args.mutation_level}_profile", df_dna_aa_profile, sorted_lineage_list, dict_filter_num_lineage)
-                
-                dict_lineage_char_mutations = {}
-                for lineage in df_lineage_mutation_frequency.columns:
-                    char_mutations = df_lineage_mutation_frequency.index[df_lineage_mutation_frequency[lineage] >= 0.75].tolist()
-                    sorted_char_mutations = sorted(char_mutations, key=custom_sort_key)
-                    dict_lineage_char_mutations[lineage] = sorted_char_mutations
-                binary_c2_profiles = pd.DataFrame(0, columns=sorted_all_unique_char_mutations, index=dict_lineage_char_mutations.keys())
-                
-                for lineage, mutations in dict_lineage_char_mutations.items():
-                    binary_c2_profiles.loc[lineage, mutations] = 1
-                
-                #print("Binary sample profiles: ", "\n", binary_sample_profiles, "\n")
-                #print("Binary C^2 profiles: ", "\n", binary_c2_profiles)
-                
-                multi_class_confusion_matrix = pd.DataFrame(0, columns=dict_lineage_char_mutations.keys(), index=dict_lineage_char_mutations.keys())
-                
-                def find_min_hamming_distance(sequence_row, df_consensus):
-                    min_distance = float('inf')
-
-                    for idx, consensus_row in df_consensus.iterrows():
-                        distance = hamming(sequence_row, consensus_row)
-                        if distance < min_distance:
-                            min_distance = distance
-                            predicted_lineage = idx
-
-                    return predicted_lineage
-                
-                for actual_lineage, sequence_row in binary_sample_profiles.iterrows():
-                    predicted_lineage = find_min_hamming_distance(sequence_row, binary_c2_profiles)
-                    multi_class_confusion_matrix.loc[actual_lineage, predicted_lineage] +=1 
-                
-                #fair number of cases where zero samples are correctly assigned, and all are assigned to one specific other lineage
-                #-> distance matrix of pairwise distances between all C^2 profiles
-                pairwise_distances = pdist(binary_c2_profiles.values, metric='hamming')
-                distance_matrix = squareform(pairwise_distances)
-                pairwise_distance_c2_df = pd.DataFrame(distance_matrix, columns=dict_lineage_char_mutations.keys(), index=dict_lineage_char_mutations.keys())
-                #pairwise_distance_c2_df.to_csv(f"pairwise_distance_c2_2023-06-05_2023-12-10.csv")
-                #results from multiclass either overfitted or small problem?
-                #-> crossvalidation
-                '''
-                So to perform cross-validation i would split the "whole data" (which is all mutation profiles from covsonar) into train and test 
-                like 70% train and 30% test (for cross validation each time different split). Create all C^2's for the training set and compute 
-                distances + assignment on the hold out, right?
-                I'd suggest 10-fold cross validation instead of a single split
-                Split the data into 10 non overlapping sets, and then for each set use 90%  of the data for training, 10% for testing. 
-                This way each sample in the data set will be in the testing set once
-                Then you do what you said, and you'll end up with 10 confusion matrices. We can look at them all, it's only 10
-                In theory you can calculate statistics on each of them and then average, but the raw confusion matrices are probably better for now
-                '''
-                #10-fold cross validation -> 10 multi_class_confusion_matrix
-                #df_mutation_profile_without_others is the whole dataset that should be splitted 
-                #no sample cut-off for splitted (traindf) to compute c^2's  
-                kf = KFold(n_splits=10)
-                counter=0
-                for train, test in kf.split(df_mutation_profile_without_others):
-                    train_df, test_df = df_mutation_profile_without_others.iloc[train].reset_index(drop=True), df_mutation_profile_without_others.iloc[test].reset_index(drop=True)
-                    binary_sample_profiles = pd.DataFrame(0, columns=sorted_all_unique_char_mutations, index=test_df['lineage'])
-                    for index, row in test_df.iterrows():
-                        binary_sample_profiles.loc[row['lineage'], row[f"{args.mutation_level}_profile"]] = 1
-                    binary_sample_profiles = binary_sample_profiles.sort_index()
-                    
-                    ##############################################################
-                    df_dna_aa_profile, dict_num_lineage = init_num_lineages('lineage', train_df)
-                    sorted_lineage_list = sorted(list(dict_num_lineage.keys()))
-                    sorted_dict_num_lineage = dict(sorted(dict_filter_num_lineage.items()))
-                    df_dna_aa_profile[f"{args.mutation_level}_profile"] = df_dna_aa_profile[f"{args.mutation_level}_profile"].apply(' '.join)
-                    df_lineage_mutation_frequency = lineage_mutation_frequency(
-                    f"{args.mutation_level}_profile", df_dna_aa_profile, sorted_lineage_list, sorted_dict_num_lineage)
-                
-                    dict_lineage_char_mutations = {}
-                    for lineage in df_lineage_mutation_frequency.columns:
-                        char_mutations = df_lineage_mutation_frequency.index[df_lineage_mutation_frequency[lineage] >= 0.75].tolist()
-                        sorted_char_mutations = sorted(char_mutations, key=custom_sort_key)
-                        dict_lineage_char_mutations[lineage] = sorted_char_mutations
-                    binary_c2_profiles = pd.DataFrame(0, columns=sorted_all_unique_char_mutations, index=dict_lineage_char_mutations.keys())
-                
-                    for lineage, mutations in dict_lineage_char_mutations.items():
-                        binary_c2_profiles.loc[lineage, mutations] = 1
-
-                    print("Binary sample profiles: ", "\n", binary_sample_profiles, "\n")
-                    print("Binary C^2 profiles: ", "\n", binary_c2_profiles)
-
-                    multi_class_confusion_matrix = pd.DataFrame(0, columns=dict_lineage_char_mutations.keys(), index=dict_lineage_char_mutations.keys())
-                    for actual_lineage, sequence_row in binary_sample_profiles.iterrows():
-                        predicted_lineage = find_min_hamming_distance(sequence_row, binary_c2_profiles)
-                        multi_class_confusion_matrix.loc[actual_lineage, predicted_lineage] +=1 
-                    counter+=1
-                    #print(f"Confusion matrix nr.{counter}:", "\n", multi_class_confusion_matrix)
-                    #multi_class_confusion_matrix.to_csv(f"10-fold_confusion_matrix_{counter}_2023-06-05_2023-12-10.csv")
-
-                quit()
                 if args.bootstrap:
                     print("random bootstrap method determines minimum sample size per lineage...")
 
@@ -1179,7 +1298,7 @@ def main():
                     plt.title('Random Bootstrap for determining minimum sample size') 
                     plt.savefig(
                         f"output/bootstrap/{date_range}/2023-09-06_accession-all_min-sample-size_cut-off-0-75.png")
-                '''
+                
                 
                 elif args.treeshrink_cirlce_diagram: 
                     directory_path = "output/consensus/2023-09-02_desh-accesions-all_cut-lin-5_consensus-squared/"
@@ -1206,7 +1325,7 @@ def main():
                     list_treeshrink_removed_c2_same = [
                         item for item in list_treeshrink_removed_c2 if item in list_all_intersected_lineages]
                     
-                    '''
+                    
                     venn2_unweighted([set(list_treeshrink_removed_c1), set(list_treeshrink_removed_c2)], ('C1', 'C2'))
                     plt.title(
                         "Removed lineages by treeshrink from UShER and C^2 phylotree")
@@ -1274,7 +1393,7 @@ def main():
                                                                                 'input/consensus_{outpath}.tsv')
                         lineages_check = df_dna_aa_profile["accession"].tolist()
                         df_check_consensus_mutations = consensus_mutations(
-                            lineage_list, df_dna_aa_profile)
+                            sorted_lineage_list, df_dna_aa_profile)
                         df_check_consensus_mutations = df_check_consensus_mutations[df_check_consensus_mutations["lineage"].isin(lineages_check)].reset_index(drop=True)
                         df_check_consensus_mutations['used_mutation'] = df_created_consensus_mutations['dna_mutations']
                         df_check_consensus_mutations['check'] = df_check_consensus_mutations.apply(lambda row: compare_lists(
