@@ -14,9 +14,9 @@ Proceed as follows to install SMFC:
 # download the repository to the current working directory using git 
 git clone https://github.com/rki-mf1/sc2-mutation-frequency-calculator.git
 # build the custom software environment using conda [recommended]
-conda env create -n sonar -f sc2-mutation-frequency-calculator/smfc.env.yml
+conda env create -n sc2mfc -f sc2-mutation-frequency-calculator/envs/sc2mfc.yml
 # activate the conda evironment if built 
-conda activate smfc
+conda activate sc2mfc
 ```
 
 ### 1.3 Options/--help
@@ -51,12 +51,9 @@ Mutation frequency matrix
 
 How a frequency matrix can be created: 
 ```bash
-# download the repository to the current working directory using git 
-git clone https://github.com/rki-mf1/sc2-mutation-frequency-calculator.git
-# build the custom software environment using conda [recommended]
-conda env create -n sonar -f sc2-mutation-frequency-calculator/smfc.env.yml
-# activate the conda evironment if built 
-conda activate smfc
+python3 scripts/init.py -tsv input/covsonar-rki-2023-02-01--2023-04-01.tsv -m \
+    -level aa -cut_freq 0.75 -cut_lin 10 -g \
+    -out output/matrix/desh_2023-02-01--2023-04-01.xlsx
 ```
 
 ## 2. Examples
@@ -68,12 +65,7 @@ signature mutations can be used to determine which mutations acuretly define a l
 How signature mutations can be calculated:  
 
 ```bash
-# download the repository to the current working directory using git 
-git clone https://github.com/rki-mf1/sc2-mutation-frequency-calculator.git
-# build the custom software environment using conda [recommended]
-conda env create -n sonar -f sc2-mutation-frequency-calculator/smfc.env.yml
-# activate the conda evironment if built 
-conda activate smfc
+python3 scripts/init.py -tsv input/covsonar-rki-2023-02-01--2023-04-01.tsv -sig
 ```
 
 ### 2.2 consensus^2 for representing a lineage
@@ -81,12 +73,7 @@ conda activate smfc
 How signature mutations can be calculated:  
 
 ```bash
-# download the repository to the current working directory using git 
-git clone https://github.com/rki-mf1/sc2-mutation-frequency-calculator.git
-# build the custom software environment using conda [recommended]
-conda env create -n sonar -f sc2-mutation-frequency-calculator/smfc.env.yml
-# activate the conda evironment if built 
-conda activate smfc
+python3 scripts/init.py -tsv input/covsonar-rki-2023-02-01--2023-04-01.tsv -con
 ```
 
 ## 3. Best practice
