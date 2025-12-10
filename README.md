@@ -75,7 +75,7 @@ python3 scripts/init.py \
   -g \
   -out output/matrix/desh_2023-02-01--2023-04-01
 ```
-![Mutation Frequency Matrix Example](src/example_mutation_frequency_matrix_12-06-2023_13-09-2023.png)
+![Mutation Frequency Matrix Example](src/example_mutation_frequency_matrix_12-06-2023_13-09-2023.png)<br>
 *Figure 1: Example mutation frequency matrix illustrating lineage-specific mutation patterns.*
 
 Output files include a frequency matrix and a meta data file with name of the parent lineage in pango annotation, the frequency of the lineage within the time frame and in how many labs the lineages were sequenced.
@@ -115,7 +115,7 @@ Your feedback is very welcome!
 
 ---
 ## Contact
-Maintainer: Ashkan Ghassemi (ashkan98)
+Maintainer: [**Ashkan Ghassemi**](https://github.com/ashkan98)
 
 
 
