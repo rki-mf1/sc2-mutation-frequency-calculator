@@ -21,18 +21,12 @@ import argparse
 import re
 from pathlib import Path
 from functools import reduce
-import requests
-import csv
-import xlsxwriter
 from itertools import combinations
 from collections import defaultdict
 import matplotlib.pyplot as plt
 import math
 from pango_aliasor.aliasor import Aliasor
-import json
 from sklearn.model_selection import KFold
-import random
-import requests
 from io import StringIO
 import seaborn as sns
 from sklearn.metrics import jaccard_score
@@ -801,22 +795,22 @@ def main():
 
                     if args.gradient:
                         if fmt != 'xlsx':
-                            print("Gradient formatting is only available for xlsx format. Please choose xlsx as matrix format.")
+                            print("Gradient formatting is only available for xlsx format. " \
+                            "Please choose xlsx as matrix format.")
                         
-                        excel_file = outfile
-                        sheet_name = 'Mutation Frequency Table'
-                        writer = pd.ExcelWriter(excel_file, engine='xlsxwriter')
-                        main_df.to_excel(writer, sheet_name=sheet_name)
-                        worksheet = writer.sheets[sheet_name]
-                        end = colToExcel(len(main_df.columns)+1) 
-                        coordinate = 'B5:' + end + str(len(main_df)+1)
-                        worksheet.conditional_format(coordinate, {'type': '2_color_scale',
-                                            'min_color': 'white',
-                                            'max_color': 'red'})
-                        worksheet.write('A1', date_range)
-                        writer.save()
-                        print(f"Gradient-formatted Excel matrix is created in {excel_file}")
+                        else:
+                            excel_file = outfile
+                            sheet_name = 'Mutation Frequency Table'
 
+                            with pd.ExcelWriter(excel_file, engine="xlsxwriter") as writer:
+                                main_df.to_excel(writer, sheet_name=sheet_name)
+                                worksheet = writer.sheets[sheet_name]
+                                end = colToExcel(len(main_df.columns)+1) 
+                                coordinate = 'B5:' + end + str(len(main_df)+1)
+                                worksheet.conditional_format(coordinate, {'type': '2_color_scale',
+                                                'min_color': 'white',
+                                                'max_color': 'red'})
+                            
                     if args.lab_plot:
                         # plot lab counts -> how many lineages come from 1, 2, 3, ... n labs
                         count_dict = defaultdict(int)

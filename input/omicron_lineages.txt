@@ -1,0 +1,7 @@
+VOC,BA.2.75.2,Omicron
+VOC,BA.4.6,Omicron
+VOC,BA.5,Omicron
+VOC,BF.7,Omicron
+VOC,BQ.1,Omicron
+VOI,XBB.1,Recombinant
+VOI,XBB.1.1,Recombinant
