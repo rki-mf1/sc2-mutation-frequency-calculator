@@ -25,8 +25,10 @@ from itertools import combinations
 from collections import defaultdict
 import matplotlib.pyplot as plt
 import math
-from pango_aliasor.aliasor import Aliasor
+import json
 from sklearn.model_selection import KFold
+import random
+import requests
 from io import StringIO
 import seaborn as sns
 from sklearn.metrics import jaccard_score
@@ -506,6 +508,7 @@ def main():
                         help='optional: will plot the sample abundancies of all lineages within the particular timeframe')
     parser.add_argument('-pmp', '--prevalence_mutation_plot', required=False, action='store_true',
                         help='optional: will plot the prevalence of all mutation frequencies lineage independently in in 5(%%) bins')
+                        help='optional: will evaluate the performance of the frequency cut-off (default 75%) by calculating precision and recall')
     parser.add_argument('-jch', '--jaccard_c2_heatmap_plot', required=False, action='store_true',
                         help='optional: will plot the pairwise jaccard dissimarities between all C^2s in a heatmap')
     parser.add_argument('-cv', '--cross_validation', required=False, action='store_true',
@@ -830,7 +833,52 @@ def main():
                         else: 
                             plt.xlabel('Number of Countries')
                             plt.title('Country diversity')
+                            
+                        # deletion average frequencies against SNPs for all lineages
+                    
+                    # if args.del_freq_plot:
+                    #     df_matrix['Freq_Mean'] = df_matrix.mean()
+                    #     print(df_matrix)
+                    #     quit()
+                    #     x_values, y_values = sorted_count_df['Value'], sorted_count_df['Count']
+                    #     plt.bar(x_values, y_values)
+                    #     plt.xlabel('Number of Labs')
+                    #     plt.ylabel('Number of Lineages')
+                    #     plt.title('Lab diversity')
 
+                    #     dict_mut_freq = {}
+                    #     for index, row in df_matrix.iloc[3:].iterrows():
+                    #         row_values = row.tolist()
+                    #         dict_mut_freq[index] = mean(row_values)
+
+                    #     dict_del_mutations = {
+                    #         key: value for key, value in dict_mut_freq.items() if "del" in key}
+                    #     dict_snp_mutations = {
+                    #         key: value for key, value in dict_mut_freq.items() if not "del" in key}
+
+                    #     plt.bar(list(dict_del_mutations.keys()),
+                    #             list(dict_del_mutations.values()))
+                    #     plt.xlabel('Deletion mutations')
+                    #     plt.ylabel('Frequency')
+                    #     plt.title(
+                    #         f'Frequency of deletions within {date_range}')
+                    #     plt.xticks(rotation=90)
+                    #     plt.show()
+
+                    #     plt.bar(list(dict_snp_mutations.keys()),
+                    #             list(dict_snp_mutations.values()))
+                    #     plt.xlabel('Deletion mutations')
+                    #     plt.ylabel('Frequency')
+                    #     plt.title(
+                    #         f'Frequency of deletions within {date_range}')
+                    #     plt.xticks(rotation=90)
+                    #     plt.show()
+
+                    #     if args.output:
+                    #         plt.savefig(f"output/matrix/{args.output}.png")
+                    #     else:
+                    #         plt.savefig(f"output/matrix/{date_range}_labdiversity.png")
+                    
                 elif args.signature:
                     df_matrix = df_matrix.tail(-3)
                     targets = df_matrix.columns.to_list()[:-1]
