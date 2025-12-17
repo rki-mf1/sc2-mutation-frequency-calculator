@@ -21,18 +21,12 @@ import argparse
 import re
 from pathlib import Path
 from functools import reduce
-import requests
-import csv
-import xlsxwriter
 from itertools import combinations
 from collections import defaultdict
 import matplotlib.pyplot as plt
 import math
 from pango_aliasor.aliasor import Aliasor
-import json
 from sklearn.model_selection import KFold
-import random
-import requests
 from io import StringIO
 import seaborn as sns
 from sklearn.metrics import jaccard_score
@@ -498,6 +492,8 @@ def main():
                         help='optional: choose specific aa mutations which are set in TXT file')
     parser.add_argument('-m', '--matrix', required=False, action='store_true',
                         help='optional: create matrix from VOI/VOC lineages and there mutation frequencies')
+    parser.add_argument('-format', '--matrix_format', required=False, choices=['xlsx', 'tsv', 'csv'], default='xlsx',
+                        help='optional, only if -m/--matrix is specified: output format for the mutation frequency matrix. Choises: xlsx (default) or tsv/csv')
     parser.add_argument('-g', '--gradient', required=False, action='store_true',
                         help='optional: apply 2-color conditional formatting to create gradient for xlsx file')
     parser.add_argument('-lplot', '--lab_plot', required=False, action='store_true',
@@ -505,11 +501,11 @@ def main():
     parser.add_argument('-con', '--consensus', required=False, action='store_true',
                         help='optional: will create consensus sequences based on given lineages')
     parser.add_argument('-fc', '--verify_frequency_cut_off', required=False, action='store_true',
-                        help='optional: will evaluate the performance of the frequency cut-off (default 75%) by calculating precision and recall')
+                        help='optional: will evaluate the performance of the frequency cut-off (default 75%%) by calculating precision and recall')
     parser.add_argument('-ssp', '--sample_size_abundancy_plot', required=False, action='store_true',
                         help='optional: will plot the sample abundancies of all lineages within the particular timeframe')
     parser.add_argument('-pmp', '--prevalence_mutation_plot', required=False, action='store_true',
-                        help='optional: will plot the prevalence of all mutation frequencies lineage independently in in 5(%) bins')
+                        help='optional: will plot the prevalence of all mutation frequencies lineage independently in in 5(%%) bins')
     parser.add_argument('-jch', '--jaccard_c2_heatmap_plot', required=False, action='store_true',
                         help='optional: will plot the pairwise jaccard dissimarities between all C^2s in a heatmap')
     parser.add_argument('-cv', '--cross_validation', required=False, action='store_true',
@@ -733,6 +729,11 @@ def main():
                             return len(gene_order)
                     
                     sorted_mutations = ['Number of sequences detected'] + sorted(aa_mutations, key=sort_gene_mutations)
+
+                    meta_part = df_matrix_frameshift_unsorted_gene_order.iloc[:3, :]
+                    body_part = df_matrix_frameshift_unsorted_gene_order.iloc[3:, :]
+                    body_part = body_part.loc[~body_part.index.duplicated(keep="first")]
+                    df_matrix_frameshift_unsorted_gene_order = pd.concat([meta_part, body_part],axis=0)
                     df_matrix_without_lab = df_matrix_frameshift_unsorted_gene_order.reindex(
                         sorted_mutations)
                     
@@ -750,32 +751,66 @@ def main():
                 parent_lineages_row = pd.DataFrame([parent_lineages], columns=df_matrix_without_parent.columns)
                 parent_lineages_row.index = ['Parent lineage']
                 df_matrix = pd.concat([parent_lineages_row, df_matrix_without_parent])
-                #df_matrix = df_matrix.transpose()
+                
                 if args.matrix:
                     
                     if args.output:
-                        outfile = args.output
+                        base_outfile = args.output
                     else:
-                        outfile = 'output/matrix/' + \
-                            date_range.replace(":", "_") + '.xlsx'
-                    df_matrix.to_excel(outfile)
+                        base_outfile = os.path.join("output", "matrix", date_range.replace("-", ""))
+                    
+                    os.makedirs(os.path.dirname(base_outfile), exist_ok=True)
+
+                    fmt = args.matrix_format
+
+                    meta_df = df_matrix.iloc[:3, :]
+                    main_df = df_matrix.iloc[3:, :]
+
+                    if fmt == 'xlsx':   
+                        outfile = base_outfile if base_outfile.lower().endswith('.xlsx') else base_outfile + '.xlsx'
+                    elif fmt == 'tsv':
+                        outfile = base_outfile if base_outfile.lower().endswith('.tsv') else base_outfile + '.tsv'
+                    elif fmt == 'csv':
+                        outfile = base_outfile if base_outfile.lower().endswith('.csv') else base_outfile + '.csv'
+                    
+                    dirname = os.path.dirname(outfile)
+                    basename = os.path.basename(outfile)
+                    meta_outfile = os.path.join(dirname, f"metadata_{basename}")
+
+                    if fmt == 'xlsx':   
+                        meta_df.to_excel(meta_outfile, index=True)
+                    elif fmt == 'tsv':
+                        meta_df.to_csv(meta_outfile, sep='\t', index=True)
+                    elif fmt == 'csv':
+                        meta_df.to_csv(meta_outfile, index=True)
+                    print(f"Metadata matrix is created in {meta_outfile}")
+
+                    if fmt == 'xlsx':   
+                        main_df.to_excel(outfile, index=True)
+                    elif fmt == 'tsv':
+                        main_df.to_csv(outfile, sep='\t', index=True)
+                    elif fmt == 'csv':
+                        main_df.to_csv(outfile, index=True)
                     print(f"Frequency matrix is created in {outfile}")
 
                     if args.gradient:
-                        excel_file = outfile
-                        sheet_name = 'Mutation Frequency Table'
-                        writer = pd.ExcelWriter(excel_file, engine='xlsxwriter')
-                        df_matrix.to_excel(writer, sheet_name=sheet_name)
-                        workbook = writer.book
-                        worksheet = writer.sheets[sheet_name]
-                        end = colToExcel(len(df_matrix.columns)+1) 
-                        coordinate = 'B5:' + end + str(len(df_matrix)+1)
-                        worksheet.conditional_format(coordinate, {'type': '2_color_scale',
-                                            'min_color': 'white',
-                                            'max_color': 'red'})
-                        worksheet.write('A1', date_range)
-                        writer.save()
+                        if fmt != 'xlsx':
+                            print("Gradient formatting is only available for xlsx format. " \
+                            "Please choose xlsx as matrix format.")
+                        
+                        else:
+                            excel_file = outfile
+                            sheet_name = 'Mutation Frequency Table'
 
+                            with pd.ExcelWriter(excel_file, engine="xlsxwriter") as writer:
+                                main_df.to_excel(writer, sheet_name=sheet_name)
+                                worksheet = writer.sheets[sheet_name]
+                                end = colToExcel(len(main_df.columns)+1) 
+                                coordinate = 'B5:' + end + str(len(main_df)+1)
+                                worksheet.conditional_format(coordinate, {'type': '2_color_scale',
+                                                'min_color': 'white',
+                                                'max_color': 'red'})
+                            
                     if args.lab_plot:
                         # plot lab counts -> how many lineages come from 1, 2, 3, ... n labs
                         count_dict = defaultdict(int)
@@ -795,52 +830,7 @@ def main():
                         else: 
                             plt.xlabel('Number of Countries')
                             plt.title('Country diversity')
-                            
-                        # deletion average frequencies against SNPs for all lineages
-                    
-                    # if args.del_freq_plot:
-                    #     df_matrix['Freq_Mean'] = df_matrix.mean()
-                    #     print(df_matrix)
-                    #     quit()
-                    #     x_values, y_values = sorted_count_df['Value'], sorted_count_df['Count']
-                    #     plt.bar(x_values, y_values)
-                    #     plt.xlabel('Number of Labs')
-                    #     plt.ylabel('Number of Lineages')
-                    #     plt.title('Lab diversity')
 
-                    #     dict_mut_freq = {}
-                    #     for index, row in df_matrix.iloc[3:].iterrows():
-                    #         row_values = row.tolist()
-                    #         dict_mut_freq[index] = mean(row_values)
-
-                    #     dict_del_mutations = {
-                    #         key: value for key, value in dict_mut_freq.items() if "del" in key}
-                    #     dict_snp_mutations = {
-                    #         key: value for key, value in dict_mut_freq.items() if not "del" in key}
-
-                    #     plt.bar(list(dict_del_mutations.keys()),
-                    #             list(dict_del_mutations.values()))
-                    #     plt.xlabel('Deletion mutations')
-                    #     plt.ylabel('Frequency')
-                    #     plt.title(
-                    #         f'Frequency of deletions within {date_range}')
-                    #     plt.xticks(rotation=90)
-                    #     plt.show()
-
-                    #     plt.bar(list(dict_snp_mutations.keys()),
-                    #             list(dict_snp_mutations.values()))
-                    #     plt.xlabel('Deletion mutations')
-                    #     plt.ylabel('Frequency')
-                    #     plt.title(
-                    #         f'Frequency of deletions within {date_range}')
-                    #     plt.xticks(rotation=90)
-                    #     plt.show()
-
-                    #     if args.output:
-                    #         plt.savefig(f"output/matrix/{args.output}.png")
-                    #     else:
-                    #         plt.savefig(f"output/matrix/{date_range}_labdiversity.png")
-                    
                 elif args.signature:
                     df_matrix = df_matrix.tail(-3)
                     targets = df_matrix.columns.to_list()[:-1]
